@@ -1,0 +1,77 @@
+datasource db {
+    provider = "postgresql"
+}
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String?  @unique
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teams     TeamMember[]
+  tasks     Task[]
+  ownedTeams Team[]
+  notifications Notification[]
+}
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String
+  adminId   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  admin     User     @relation(fields: [adminId], references: [id])
+  members   TeamMember[]
+  tasks     Task[]
+}
+
+model TeamMember {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  teamId    String
+  role      String   @default("Member") // Admin, Member
+  status    String   @default("Pending") // Active, Pending
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  team      Team     @relation(fields: [teamId], references: [id])
+
+  @@unique([userId, teamId])
+}
+
+model Task {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  status      String   @default("To Do")
+  priority    String   @default("Medium")
+  dueDate     DateTime?
+  teamId      String
+  assigneeId  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team     @relation(fields: [teamId], references: [id])
+  assignee    User?    @relation(fields: [assigneeId], references: [id])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String
+  message   String
+  teamId    String?
+  taskId    Int?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+}
