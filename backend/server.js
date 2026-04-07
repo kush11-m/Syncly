@@ -11,13 +11,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT;
 
 // Create HTTP server and attach Socket.IO
 const httpServer = createServer(app);
 export const io = new Server(httpServer, {
     cors: {
-        origin: ["http://localhost:5175", "https://syncly-d3jz.vercel.app"], // Development and Production URLs
+        origin: ["http://localhost:5175", "https://syncly-kush.vercel.app"], // Development and Production URLs
         methods: ["GET", "POST"]
     }
 });
