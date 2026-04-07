@@ -37,44 +37,96 @@ export const joinTeam = async (req, res) => {
     const userId = req.user.userId;
 
     try {
-        if (!teamId) {
+        const normalizedTeamId = String(teamId || '').trim();
+
+        if (!normalizedTeamId) {
             return res.status(400).json({ message: "Team ID is required" });
+        }
+
+        const [team, user] = await Promise.all([
+            prisma.team.findUnique({ where: { id: normalizedTeamId } }),
+            prisma.user.findUnique({ where: { id: userId } })
+        ]);
+
+        if (!team) {
+            return res.status(404).json({ message: "Team not found" });
         }
 
         const existingMember = await prisma.teamMember.findUnique({
             where: {
                 userId_teamId: {
                     userId,
-                    teamId
+                    teamId: normalizedTeamId
                 }
             }
         });
 
-        if (existingMember) {
-            return res.status(400).json({ message: "Already a member or pending" });
+        if (existingMember?.status === 'Active') {
+            return res.status(200).json({
+                message: "Already a team member",
+                team: {
+                    id: team.id,
+                    name: team.name,
+                    adminId: team.adminId
+                },
+                memberStatus: 'Active',
+                alreadyMember: true
+            });
         }
 
-        await prisma.teamMember.create({
-            data: {
-                userId,
-                teamId,
-                status: 'Pending'
-            }
-        });
+        if (existingMember) {
+            await prisma.teamMember.update({
+                where: { id: existingMember.id },
+                data: {
+                    status: 'Active',
+                    role: existingMember.role || 'Member'
+                }
+            });
+        } else {
+            await prisma.teamMember.create({
+                data: {
+                    userId,
+                    teamId: normalizedTeamId,
+                    status: 'Active',
+                    role: 'Member'
+                }
+            });
+        }
 
-        // Notify team admin
-        const team = await prisma.team.findUnique({ where: { id: teamId } });
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (team && user) {
+        // Notify admin when a new member joins (except when admin joins their own team).
+        if (team.adminId !== userId && user) {
             await createNotification(
                 team.adminId,
-                'join_request',
-                `${user.name} requested to join ${team.name}`,
-                teamId
+                'member_joined',
+                `${user.name} joined ${team.name}`,
+                normalizedTeamId
             );
+
+            io.to(`user_${team.adminId}`).emit('new_notification', {
+                type: 'member_joined',
+                message: `${user.name} joined ${team.name}`,
+                teamId: normalizedTeamId
+            });
         }
 
-        res.status(200).json({ message: "Request to join sent" });
+        const activeMembers = await prisma.teamMember.findMany({
+            where: { teamId: normalizedTeamId, status: 'Active' }
+        });
+
+        for (const member of activeMembers) {
+            io.to(`user_${member.userId}`).emit('team_updated', { teamId: normalizedTeamId });
+        }
+
+        res.status(200).json({
+            message: "Joined team successfully",
+            team: {
+                id: team.id,
+                name: team.name,
+                adminId: team.adminId
+            },
+            memberStatus: 'Active',
+            alreadyMember: false
+        });
     } catch (error) {
         console.error("Join team error:", error);
         res.status(500).json({ message: "Server error" });
@@ -91,7 +143,7 @@ export const getTeam = async (req, res) => {
                 members: {
                     include: {
                         user: {
-                            select: { id: true, name: true, email: true }
+                            select: { id: true, name: true, email: true, avatarUrl: true, username: true }
                         }
                     }
                 },
@@ -247,6 +299,73 @@ export const rejectMember = async (req, res) => {
         res.status(200).json({ message: "Member rejected" });
     } catch (error) {
         console.error("Reject member error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const updateMemberRole = async (req, res) => {
+    const { teamId, memberId, role } = req.body;
+    const userId = req.user.userId;
+
+    try {
+        const team = await prisma.team.findUnique({ where: { id: teamId } });
+        if (!team) {
+            return res.status(404).json({ message: "Team not found" });
+        }
+
+        const requester = await prisma.teamMember.findUnique({
+            where: { userId_teamId: { userId, teamId } }
+        });
+
+        const isOwner = team.adminId === userId;
+
+        if (!requester || (!isOwner && requester.role?.toLowerCase() !== 'admin')) {
+            return res.status(403).json({ message: "Not authorized. Only the team owner or admins can change roles." });
+        }
+
+        const validRoles = ['Admin', 'Member', 'Viewer'];
+        const formatRole = role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+        
+        if (!validRoles.includes(formatRole)) {
+            return res.status(400).json({ message: "Invalid role" });
+        }
+
+        const member = await prisma.teamMember.findUnique({
+            where: { id: parseInt(memberId) }
+        });
+
+        if (!member || member.teamId !== teamId) {
+            return res.status(404).json({ message: "Member not found" });
+        }
+
+        if (member.userId === team.adminId) {
+            return res.status(400).json({ message: "Cannot change the role of the team owner" });
+        }
+
+        if (!isOwner && member.role?.toLowerCase() === 'admin') {
+            return res.status(403).json({ message: "Only the owner can change the roles of other Admins." });
+        }
+
+        if (!isOwner && formatRole?.toLowerCase() === 'admin') {
+            return res.status(403).json({ message: "Only the owner can promote users to Admin." });
+        }
+
+        const updatedMember = await prisma.teamMember.update({
+            where: { id: parseInt(memberId) },
+            data: { role: formatRole }
+        });
+
+        // Emit team update event
+        const allMembers = await prisma.teamMember.findMany({
+            where: { teamId, status: 'Active' }
+        });
+        for (const m of allMembers) {
+            io.to(`user_${m.userId}`).emit('team_updated', { teamId });
+        }
+
+        res.status(200).json({ message: "Member role updated successfully", member: updatedMember });
+    } catch (error) {
+        console.error("Update role error:", error);
         res.status(500).json({ message: "Server error" });
     }
 };

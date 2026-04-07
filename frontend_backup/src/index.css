@@ -1,0 +1,133 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #ffffff;
+  /* White text for primary */
+  --secondary: #27272a;
+  /* Zinc-800 for secondary elements */
+  --accent: #d4d4d8;
+  --app-bg: #090b10;
+  /* Zinc-300 for accents */
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+body {
+  @apply font-sans tracking-tight min-h-screen text-zinc-100;
+  background-color: var(--app-bg);
+  background-image:
+    radial-gradient(circle at 10% 15%, rgba(249, 115, 22, 0.09), transparent 35%),
+    radial-gradient(circle at 88% 80%, rgba(245, 158, 11, 0.06), transparent 40%),
+    linear-gradient(180deg, #090b10 0%, #090b10 100%);
+  background-attachment: fixed;
+}
+
+/* Custom text selection color - orange */
+::selection {
+  background-color: #f97316;
+  /* Orange-500 */
+  color: white;
+}
+
+::-moz-selection {
+  background-color: #f97316;
+  /* Orange-500 */
+  color: white;
+}
+
+/* Custom Utilities for the Theme */
+.glass {
+  @apply bg-zinc-900/50 backdrop-blur-md border border-zinc-800 shadow-sm;
+}
+
+.glass-card {
+  @apply bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/50 shadow-md rounded-xl;
+}
+
+.btn-primary {
+  @apply bg-white text-black px-4 py-2 rounded-md font-medium hover:bg-zinc-200 transition-colors shadow-sm;
+}
+
+.btn-secondary {
+  @apply bg-zinc-800 text-white px-4 py-2 rounded-md font-medium border border-zinc-700 hover:bg-zinc-700 transition-colors;
+}
+
+.text-gradient {
+  @apply text-white;
+  /* Removed gradient text, kept simple white */
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-zinc-950;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-800 rounded-full hover:bg-zinc-700;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  @apply font-display font-semibold tracking-tight text-white;
+}
+
+@layer components {
+  .app-page {
+    @apply relative min-h-screen w-full overflow-hidden bg-[#090b10] text-zinc-100;
+  }
+
+  .app-panel {
+    @apply rounded-3xl border border-white/10 bg-zinc-950/70 backdrop-blur-xl shadow-2xl shadow-black/30;
+  }
+
+  .app-card {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-lg;
+  }
+
+  .app-title {
+    @apply font-display tracking-tight text-white;
+  }
+
+  .app-kicker {
+    @apply inline-flex items-center gap-2 rounded-full border border-orange-400/30 bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-orange-200;
+  }
+
+  .app-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-500/20 transition-colors hover:bg-orange-400;
+  }
+
+  .app-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-zinc-200 transition-colors hover:border-orange-300/40 hover:bg-orange-500/10 hover:text-white;
+  }
+}
+
+/* Input Styles Reset */
+input,
+textarea,
+select {
+  @apply bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-white transition-all;
+}
+
+/* Drag and Drop Fixes - Portal rendering for smooth cursor tracking */
+[data-rbd-draggable-id] {
+  position: relative;
+}
+
+/* Ensure portal-rendered dragging elements have maximum z-index */
+body>[data-rbd-draggable-id] {
+  z-index: 10000 !important;
+  pointer-events: none;
+}
+
+/* Theme Switcher Removed (Enforcing Dark Mode) */

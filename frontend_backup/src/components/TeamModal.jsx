@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { X, Copy, Check, UserPlus, Shield, User, Crown } from "lucide-react";
+import { Link } from "react-router-dom";
+import { X, Copy, Check, UserPlus, Shield, User } from "lucide-react";
 
 export default function TeamModal({ isOpen, onClose, team, currentUser, onApprove, onReject, onRoleChange }) {
     const [copied, setCopied] = useState(false);
 
     if (!isOpen || !team) return null;
 
-    // Determine permissions
+    // Convert IDs to numbers for comparison
     const currentUserMember = team?.members?.find(m => Number(m.userId) === Number(currentUser?.id));
     const isOwner = Number(currentUser?.id) === Number(team.adminId);
+    
     let isTeamAdmin = isOwner;
     if (currentUserMember && currentUserMember.role && typeof currentUserMember.role === 'string') {
         if (currentUserMember.role.toLowerCase() === 'admin') {
@@ -17,12 +19,12 @@ export default function TeamModal({ isOpen, onClose, team, currentUser, onApprov
     }
 
     const members = team.members || [];
+
     const activeMembers = members.filter(m => m.status === "Active");
     const pendingMembers = members.filter(m => m.status === "Pending");
 
-    const inviteUrl = `${window.location.origin}/join/${team.id}`;
-
     const handleCopyInvite = () => {
+        const inviteUrl = `${window.location.origin}/join/${team.id}`;
         navigator.clipboard.writeText(inviteUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -44,29 +46,24 @@ export default function TeamModal({ isOpen, onClose, team, currentUser, onApprov
                     </button>
                 </div>
 
-                {/* Invite Link Section - Improved Readability */}
                 <div className="mb-8 p-4 rounded-xl border border-white/5 bg-white/5">
-                    <h3 className="font-bold mb-3 flex items-center gap-2 text-zinc-200">
+                    <h3 className="font-bold mb-2 flex items-center gap-2 text-zinc-200">
                         <UserPlus size={18} /> Invite Members
                     </h3>
                     <div className="flex gap-3 items-center">
-                        <div className="flex-1 px-4 py-3 rounded-xl border border-orange-500/20 bg-orange-500/5 text-sm font-mono overflow-hidden">
-                            <span className="text-zinc-500">{window.location.origin}/join/</span>
-                            <span className="text-orange-300 select-all">{team.id.substring(0, 8)}</span>
-                            <span className="text-zinc-600">...</span>
+                        <div className="flex-1 px-4 py-3 rounded-xl border border-orange-500/20 bg-orange-500/5 text-sm text-orange-200 font-mono tracking-wide">
+                            syncly.com/join/ <span className="text-zinc-500">{team.id.substring(0,8)}...</span>
                         </div>
                         <button
                             onClick={handleCopyInvite}
-                            className="px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-600/20 shrink-0"
+                            className="px-5 py-3 rounded-xl font-bold flex items-center gap-2 transition-all bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-600/20"
                         >
                             {copied ? <Check size={18} /> : <Copy size={18} />}
                             {copied ? "Copied" : "Copy Link"}
                         </button>
                     </div>
-                    <p className="text-xs text-zinc-500 mt-2">Share this link with people you want to invite to your team.</p>
                 </div>
 
-                {/* Pending Requests */}
                 {isTeamAdmin && pendingMembers.length > 0 && (
                     <div className="mb-8">
                         <h3 className="font-bold mb-3 flex items-center gap-2 text-zinc-200">
@@ -81,9 +78,13 @@ export default function TeamModal({ isOpen, onClose, team, currentUser, onApprov
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded-full bg-black/20 flex items-center justify-center font-bold text-zinc-300 border border-white/5">
                                             {member.avatarUrl ? (
-                                                <img src={member.avatarUrl} alt={member.name} className="h-full w-full rounded-full object-cover" />
+                                                <img
+                                                    src={member.avatarUrl}
+                                                    alt={member.name}
+                                                    className="h-full w-full rounded-full object-cover"
+                                                />
                                             ) : (
-                                                member.name?.[0] || 'U'
+                                                member.name[0]
                                             )}
                                         </div>
                                         <div>
@@ -111,29 +112,15 @@ export default function TeamModal({ isOpen, onClose, team, currentUser, onApprov
                     </div>
                 )}
 
-                {/* Active Team Members with Role Management */}
                 <div>
                     <h3 className="font-bold mb-3 flex items-center gap-2 text-zinc-200">
                         Team Members <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 border border-white/5">{activeMembers.length}</span>
                     </h3>
                     <div className="space-y-2">
-                        {activeMembers.map(member => {
-                            const isTargetOwner = Number(member.userId) === Number(team.adminId);
-
-                            // Determine if current user can edit this member's role
-                            let canEditRole = false;
-                            if (isOwner && !isTargetOwner) {
-                                canEditRole = true;
-                            } else if (isTeamAdmin && !isOwner && !isTargetOwner) {
-                                const targetRole = (member.role && typeof member.role === 'string') ? member.role.toLowerCase() : '';
-                                if (targetRole !== 'admin') {
-                                    canEditRole = true;
-                                }
-                            }
-
-                            return (
-                                <div key={member.id} className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5 hover:border-white/10 transition-colors">
-                                    <div className="flex items-center gap-3">
+                        {activeMembers.map(member => (
+                            <div key={member.id} className="flex items-center justify-between p-3 rounded-xl bg-black/20 border border-white/5 hover:border-white/10 transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <Link to={`/u/${member.username || member.userId}`} className="block relative">
                                         {member.avatarUrl ? (
                                             <img src={member.avatarUrl} alt={member.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/10" />
                                         ) : (
@@ -141,45 +128,47 @@ export default function TeamModal({ isOpen, onClose, team, currentUser, onApprov
                                                 {member.name?.charAt(0).toUpperCase() || 'U'}
                                             </div>
                                         )}
-                                        <div>
-                                            <p className="font-medium text-zinc-200">
-                                                {member.name}
-                                                {Number(member.userId) === Number(currentUser?.id) && (
-                                                    <span className="text-zinc-500 text-xs ml-1">(You)</span>
-                                                )}
-                                            </p>
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                                {canEditRole ? (
-                                                    <select
-                                                        value={member.role || 'Member'}
-                                                        onChange={(e) => onRoleChange && onRoleChange(member.id, e.target.value)}
-                                                        className="bg-black/40 border border-white/10 text-zinc-300 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-orange-500/50 cursor-pointer"
-                                                    >
-                                                        {isOwner && <option value="Admin">Admin</option>}
-                                                        <option value="Member">Member</option>
-                                                        <option value="Viewer">Viewer</option>
-                                                    </select>
-                                                ) : (
-                                                    <span className="text-xs text-zinc-500">{member.role || 'Member'}</span>
-                                                )}
-                                                {isTargetOwner && (
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 font-medium flex items-center gap-1">
-                                                        <Crown size={10} /> Owner
-                                                    </span>
-                                                )}
-                                            </div>
+                                    </Link>
+                                    <div>
+                                        <Link to={`/u/${member.username || member.userId}`} className="font-medium text-zinc-200 hover:text-white transition-colors">{member.name}</Link>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                            {(()=>{
+                                                let canEditRole = false;
+                                                const isTargetOwner = Number(member.userId) === Number(team.adminId);
+                                                
+                                                if (isOwner) {
+                                                    canEditRole = !isTargetOwner;
+                                                } else if (isTeamAdmin) {
+                                                    const targetRole = (member.role && typeof member.role === 'string') ? member.role.toLowerCase() : '';
+                                                    if (!isTargetOwner && targetRole !== 'admin') {
+                                                        canEditRole = true;
+                                                    }
+                                                }
+
+                                                if (canEditRole) {
+                                                    return (
+                                                        <select
+                                                            value={member.role || 'Member'}
+                                                            onChange={(e) => onRoleChange && onRoleChange(member.id, e.target.value)}
+                                                            className="bg-black/40 border border-white/10 text-zinc-300 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-orange-500/50"
+                                                        >
+                                                            {isOwner ? <option value="Admin">Admin</option> : null}
+                                                            <option value="Member">Member</option>
+                                                            <option value="Viewer">Viewer</option>
+                                                        </select>
+                                                    );
+                                                } else {
+                                                    return <span className="text-xs text-zinc-500">{member.role || ''}</span>;
+                                                }
+                                            })()}
+                                            {Number(member.userId) === Number(team.adminId) && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 font-medium">Owner</span>
+                                            )}
                                         </div>
                                     </div>
-                                    {isTargetOwner ? (
-                                        <Shield size={16} className="text-orange-500" />
-                                    ) : member.role?.toLowerCase() === 'admin' ? (
-                                        <Shield size={16} className="text-blue-400/60" />
-                                    ) : (
-                                        <User size={16} className="opacity-30 text-zinc-600" />
-                                    )}
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>

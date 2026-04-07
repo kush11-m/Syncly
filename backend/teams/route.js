@@ -1,14 +1,15 @@
 import { Router } from "express";
-import { createTeam, joinTeam, getTeam, getUserTeams, approveMember, rejectMember } from "./controller.js";
+import { approveMember, createTeam, getTeam, getUserTeams, joinTeam, rejectMember, updateMemberRole } from "./controller.js";
 import { isAuthenticated } from "../auth/middleware.js";
 
 const router = Router();
 
-router.post('/', isAuthenticated, createTeam);
 router.get('/', isAuthenticated, getUserTeams);
+router.post('/', isAuthenticated, createTeam);
 router.post('/join', isAuthenticated, joinTeam);
 router.post('/approve', isAuthenticated, approveMember);
 router.post('/reject', isAuthenticated, rejectMember);
+router.put('/role', isAuthenticated, updateMemberRole);
 router.get('/:teamId', isAuthenticated, getTeam);
 
 export const teamRoutes = router;

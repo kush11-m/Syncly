@@ -35,27 +35,29 @@ export const createTask = async (req, res) => {
             }
         });
 
-        // Notify team members except creator
-        const creator = await prisma.user.findUnique({ where: { id: userId } });
-        const teamMembers = await prisma.teamMember.findMany({
-            where: { teamId, status: 'Active', userId: { not: userId } }
-        });
-
-        for (const member of teamMembers) {
+        // Only notify the assignee (not all team members)
+        if (assigneeId && assigneeId !== userId) {
+            const creator = await prisma.user.findUnique({ where: { id: userId } });
             await createNotification(
-                member.userId,
+                assigneeId,
                 'task_created',
-                `${creator.name} created task: ${title}`,
+                `${creator.name} assigned you a task: ${title}`,
                 teamId,
                 newTask.id
             );
+            io.to(`user_${assigneeId}`).emit('task_created', {
+                task: newTask,
+                teamId
+            });
         }
 
-        // Emit real-time event to all team members EXCEPT the creator
+        // Still emit real-time task_created for board sync to all OTHER team members
         const allMembers = await prisma.teamMember.findMany({
             where: { teamId, status: 'Active', userId: { not: userId } }
         });
         for (const member of allMembers) {
+            // Skip assignee since we already notified them above
+            if (member.userId === assigneeId) continue;
             io.to(`user_${member.userId}`).emit('task_created', {
                 task: newTask,
                 teamId
@@ -139,27 +141,29 @@ export const updateTask = async (req, res) => {
             }
         });
 
-        // Notify team members except updater
-        const updater = await prisma.user.findUnique({ where: { id: userId } });
-        const teamMembers = await prisma.teamMember.findMany({
-            where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
-        });
-
-        for (const member of teamMembers) {
+        // Only notify the assignee of the task (not all team members)
+        const assignee = updatedTask.assigneeId;
+        if (assignee && assignee !== userId) {
+            const updater = await prisma.user.findUnique({ where: { id: userId } });
             await createNotification(
-                member.userId,
+                assignee,
                 'task_updated',
                 `${updater.name} updated task: ${task.title}`,
                 task.teamId,
                 task.id
             );
+            io.to(`user_${assignee}`).emit('task_updated', {
+                task: updatedTask,
+                teamId: task.teamId
+            });
         }
 
-        // Emit real-time event to all team members EXCEPT the one who made the update
+        // Emit real-time task_updated for board sync to all OTHER team members
         const allMembers = await prisma.teamMember.findMany({
             where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
         });
         for (const member of allMembers) {
+            if (member.userId === assignee) continue;
             io.to(`user_${member.userId}`).emit('task_updated', {
                 task: updatedTask,
                 teamId: task.teamId
@@ -198,26 +202,27 @@ export const deleteTask = async (req, res) => {
 
         await prisma.task.delete({ where: { id: parseInt(taskId) } });
 
-        // Notify team members except deleter
-        const deleter = await prisma.user.findUnique({ where: { id: userId } });
-        const teamMembers = await prisma.teamMember.findMany({
-            where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
-        });
-
-        for (const member of teamMembers) {
+        // Only notify the assignee of the deleted task
+        if (task.assigneeId && task.assigneeId !== userId) {
+            const deleter = await prisma.user.findUnique({ where: { id: userId } });
             await createNotification(
-                member.userId,
+                task.assigneeId,
                 'task_deleted',
                 `${deleter.name} deleted task: ${task.title}`,
                 task.teamId
             );
+            io.to(`user_${task.assigneeId}`).emit('task_deleted', {
+                taskId: task.id,
+                teamId: task.teamId
+            });
         }
 
-        // Emit real-time event to all team members EXCEPT the deleter
+        // Emit real-time task_deleted for board sync to all OTHER team members
         const allMembers = await prisma.teamMember.findMany({
             where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
         });
         for (const member of allMembers) {
+            if (member.userId === task.assigneeId) continue;
             io.to(`user_${member.userId}`).emit('task_deleted', {
                 taskId: task.id,
                 teamId: task.teamId

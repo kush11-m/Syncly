@@ -89,7 +89,8 @@ export default function Dashboard({ openSettings = false }) {
     setLoading(true);
     try {
       const teamsRes = await fetch(`${env.BACKEND_URL}/api/teams`, {
-        headers: { 'Authorization': user?.token }
+        headers: { 'Authorization': user?.token },
+        cache: 'no-store'
       });
 
       let activeTeamId = null;
@@ -132,7 +133,8 @@ export default function Dashboard({ openSettings = false }) {
       }
 
       const teamRes = await fetch(`${env.BACKEND_URL}/api/teams/${activeTeamId}`, {
-        headers: { 'Authorization': user?.token }
+        headers: { 'Authorization': user?.token },
+        cache: 'no-store'
       });
 
       if (teamRes.ok) {
@@ -143,8 +145,10 @@ export default function Dashboard({ openSettings = false }) {
           members: teamData.team.members?.map(member => ({
             id: member.id, // This is the TeamMember ID, needed for approve/reject
             userId: member.user.id,
+            username: member.user.username,
             name: member.user.name,
             email: member.user.email,
+            avatarUrl: member.user.avatarUrl,
             role: member.role,
             status: member.status
           })) || []
@@ -153,7 +157,8 @@ export default function Dashboard({ openSettings = false }) {
       }
 
       const tasksRes = await fetch(`${env.BACKEND_URL}/api/tasks/team/${activeTeamId}`, {
-        headers: { 'Authorization': user?.token }
+        headers: { 'Authorization': user?.token },
+        cache: 'no-store'
       });
 
       if (tasksRes.ok) {
@@ -167,7 +172,12 @@ export default function Dashboard({ openSettings = false }) {
 
         tasksData.tasks.forEach(task => {
           const taskId = normalizeTaskId(task.id);
-          newTasks[taskId] = { ...task, content: task.title };
+          newTasks[taskId] = {
+            ...task,
+            content: task.title,
+            assignee: task.assignee?.name || null,
+            assigneeId: task.assignee?.id || null
+          };
           const status = statusToColumnId(task.status);
           if (newColumns[status]) {
             newColumns[status].taskIds.push(taskId);
@@ -410,6 +420,7 @@ export default function Dashboard({ openSettings = false }) {
           teamId: team.id,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
+          assigneeId: taskData.assigneeId ? parseInt(taskData.assigneeId) : null,
           status: taskData.status === 'todo' ? 'To Do' :
             taskData.status === 'inprogress' ? 'In Progress' : 'Done'
         })
@@ -452,6 +463,7 @@ export default function Dashboard({ openSettings = false }) {
           description: taskData.description,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
+          assigneeId: taskData.assigneeId ? parseInt(taskData.assigneeId) : null,
           status: backendStatus
         })
       });
@@ -628,31 +640,32 @@ export default function Dashboard({ openSettings = false }) {
     if (!team) return;
     try {
       const res = await fetch(`${env.BACKEND_URL}/api/teams/reject`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': user?.token
+          "Content-Type": "application/json",
+          "Authorization": user?.token
         },
         body: JSON.stringify({ teamId: team.id, memberId })
       });
-
       if (res.ok) {
-        fetchTeamAndTasks();
+        toast.success("Member rejected");
       }
     } catch (error) {
-      console.error("Error rejecting member:", error);
+      console.error(error);
+      toast.error("Failed to reject member");
     }
   };
 
   const handleRoleChange = async (memberId, newRole) => {
     if (!team) return;
     try {
+
       // Optimistic update
       setTeam(prevTeam => {
         if (!prevTeam) return prevTeam;
         return {
           ...prevTeam,
-          members: prevTeam.members.map(m =>
+          members: prevTeam.members.map(m => 
             m.id === memberId ? { ...m, role: newRole } : m
           )
         };
@@ -666,15 +679,17 @@ export default function Dashboard({ openSettings = false }) {
         },
         body: JSON.stringify({ teamId: team.id, memberId, role: newRole })
       });
-
+      
+      const data = await res.json();
+      
       if (!res.ok) {
-        const data = await res.json();
-        console.error("Role change failed:", data.message);
-        fetchTeamAndTasks(); // Revert on failure
+        toast.error(data.message || "Failed to update role");
+        fetchTeamAndTasks(); // Revert original state
       }
     } catch (error) {
-      console.error("Error changing role:", error);
-      fetchTeamAndTasks(); // Revert on error
+      console.error(error);
+      toast.error("Failed to update role");
+      fetchTeamAndTasks(); // Revert original state
     }
   };
 
@@ -961,6 +976,7 @@ export default function Dashboard({ openSettings = false }) {
         task={editingTask}
         initialDate={selectedDate}
         initialStatus={targetColumn}
+        team={team}
       />
 
       <TeamModal
@@ -1076,7 +1092,8 @@ function CalendarView({ tasks, currentDate, onDateChange, onDateClick, onTaskCli
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
   const tasksByDate = Object.values(tasks).reduce((acc, task) => {
-    const date = task.dueDate;
+    if (!task.dueDate) return acc;
+    const date = task.dueDate.split('T')[0];
     if (!acc[date]) acc[date] = [];
     acc[date].push(task);
     return acc;
