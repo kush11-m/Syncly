@@ -179,7 +179,7 @@ export default function LandingPage() {
                                 transition={{ delay: idx * 0.15 }}
                                 className="relative flex items-start gap-4 sm:gap-6 p-6 rounded-xl border border-white/10 bg-zinc-950/60 backdrop-blur-xl hover:border-orange-500/20 transition-all overflow-hidden"
                             >
-                                <div className="text-4xl sm:text-5xl md:text-6xl font-bold text-orange-500/10 flex-shrink-0">{item.step}</div>
+                                <div className="text-4xl sm:text-5xl md:text-6xl font-bold text-orange-400/90 flex-shrink-0">{item.step}</div>
                                 <div className="flex-1">
                                     <h3 className="app-title text-xl sm:text-2xl font-bold mb-2 text-white">{item.title}</h3>
                                     <p className="text-zinc-400 text-base sm:text-lg">{item.description}</p>
