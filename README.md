@@ -12,7 +12,7 @@ Key Features
 - Kanban boards with drag-and-drop
 - Real-time updates via Socket.IO
 - Comments, activity feed & notifications
-- Global search, filters, sorting & pagination
+- Global search, filters, sorting & pagination 
 - Multiple theme switcher options
 - Role-based permissions
 Tech Stack
