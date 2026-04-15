@@ -2,7 +2,7 @@ Syncly – The Real-Time Task Board
 A collaborative, real-time project management platform built to keep teams connected, updated, and
 productive.
 Live Links (Add yours here)
-- Frontend: https://syncly-d3jz.vercel.app/
+- Frontend: https://syncly-kush.vercel.app/
 - Backend: http://syncly-production-0246.up.railway.app/
 Overview
 Syncly is a real-time task management dashboard designed for teams that need instant updates,
@@ -19,11 +19,11 @@ Tech Stack
 Frontend: React, React Router, Context/Redux, TailwindCSS, Axios, react-beautiful-dnd
 Backend: Node.js, Express, Socket.IO
 Database: MongoDB Atlas (Mongoose)
-Hosting: Vercel/Netlify (Frontend), Render/Railway (Backend)
+Hosting: Vercel (Frontend), Railway (Backend)
 API Overview
 Includes authentication, project, task, comments, notifications, and user management endpoints.
 Installation
-1. Clone: git clone https://github.com/yourusername/syncly.git
+1. Clone: git clone https://github.com/kush11-m/syncly.git
 2. Install: cd client && npm install; cd server && npm install
 3. Run: npm run dev (frontend), npm start (backend)
 Theme Changing
