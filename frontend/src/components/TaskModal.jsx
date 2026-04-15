@@ -1,13 +1,25 @@
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 
-export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, initialStatus = "todo" }) {
+const toDateInputValue = (value) => {
+    if (!value) return "";
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    if (typeof value === 'string') {
+        const isoPrefix = value.slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(isoPrefix)) return isoPrefix;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toISOString().slice(0, 10);
+};
+
+export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, initialStatus = "todo", teamMembers = [] }) {
     const [formData, setFormData] = useState({
         content: "",
         description: "",
         status: "todo",
         priority: "Medium",
-        assignee: "",
+        assigneeId: "",
         dueDate: "",
     });
 
@@ -27,8 +39,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     description: task.description || "",
                     status: internalStatus,
                     priority: task.priority || "Medium",
-                    assignee: task.assignee || "",
-                    dueDate: task.dueDate || "",
+                    assigneeId: (task.assigneeId ?? task.assignee?.id ?? "")?.toString?.() ?? "",
+                    dueDate: toDateInputValue(task.dueDate),
                 });
             } else {
                 setFormData({
@@ -36,8 +48,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     description: "",
                     status: initialStatus,
                     priority: "Medium",
-                    assignee: "",
-                    dueDate: initialDate || new Date().toISOString().split('T')[0],
+                    assigneeId: "",
+                    dueDate: toDateInputValue(initialDate || new Date()),
                 });
             }
         }
@@ -47,7 +59,11 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave({ ...formData, id: task?.id });
+        onSave({
+            ...formData,
+            id: task?.id,
+            assigneeId: formData.assigneeId ? Number(formData.assigneeId) : null
+        });
         onClose();
     };
 
@@ -128,12 +144,18 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
 
                     <div>
                         <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Assignee</label>
-                        <input
-                            value={formData.assignee}
-                            onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
-                            className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 placeholder-zinc-600 focus:bg-white/10 transition-colors"
-                            placeholder="Assign to..."
-                        />
+                        <select
+                            value={formData.assigneeId}
+                            onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })}
+                            className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors appearance-none"
+                        >
+                            <option value="" className="bg-zinc-900 text-zinc-100">Unassigned</option>
+                            {teamMembers.map((member) => (
+                                <option key={member.userId} value={member.userId} className="bg-zinc-900 text-zinc-100">
+                                    {member.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
 
                     <div className="flex justify-end gap-3 mt-6">

@@ -24,28 +24,62 @@ export const createTask = async (req, res) => {
             return res.status(403).json({ message: "Not authorized to create tasks for this team" });
         }
 
+        let normalizedAssigneeId = null;
+        if (assigneeId !== undefined && assigneeId !== null && assigneeId !== '') {
+            const parsedAssigneeId = Number(assigneeId);
+            if (!Number.isInteger(parsedAssigneeId)) {
+                return res.status(400).json({ message: "Invalid assigneeId" });
+            }
+
+            const assigneeMembership = await prisma.teamMember.findUnique({
+                where: {
+                    userId_teamId: {
+                        userId: parsedAssigneeId,
+                        teamId
+                    }
+                }
+            });
+
+            if (!assigneeMembership || assigneeMembership.status !== 'Active') {
+                return res.status(400).json({ message: "Assignee must be an active member of the team" });
+            }
+
+            normalizedAssigneeId = parsedAssigneeId;
+        }
+
         const newTask = await prisma.task.create({
             data: {
                 title,
                 description,
                 teamId,
-                assigneeId: assigneeId || null,
+                assigneeId: normalizedAssigneeId,
                 priority: priority || 'Medium',
                 dueDate: dueDate ? new Date(dueDate) : null
+            },
+            include: {
+                assignee: { select: { id: true, name: true } }
             }
         });
 
         // Only notify the assignee (not all team members)
-        if (assigneeId && assigneeId !== userId) {
+        if (normalizedAssigneeId && normalizedAssigneeId !== userId) {
             const creator = await prisma.user.findUnique({ where: { id: userId } });
             await createNotification(
-                assigneeId,
+                normalizedAssigneeId,
                 'task_created',
                 `${creator.name} assigned you a task: ${title}`,
                 teamId,
                 newTask.id
             );
-            io.to(`user_${assigneeId}`).emit('task_created', {
+
+            io.to(`user_${normalizedAssigneeId}`).emit('new_notification', {
+                type: 'task_created',
+                message: `${creator.name} assigned you a task: ${title}`,
+                teamId,
+                taskId: newTask.id
+            });
+
+            io.to(`user_${normalizedAssigneeId}`).emit('task_created', {
                 task: newTask,
                 teamId
             });
@@ -57,7 +91,7 @@ export const createTask = async (req, res) => {
         });
         for (const member of allMembers) {
             // Skip assignee since we already notified them above
-            if (member.userId === assigneeId) continue;
+            if (normalizedAssigneeId && member.userId === normalizedAssigneeId) continue;
             io.to(`user_${member.userId}`).emit('task_created', {
                 task: newTask,
                 teamId
@@ -129,6 +163,33 @@ export const updateTask = async (req, res) => {
             return res.status(403).json({ message: "Not authorized to update tasks for this team" });
         }
 
+        let normalizedAssigneeId = undefined;
+        if (assigneeId !== undefined) {
+            if (assigneeId === null || assigneeId === '') {
+                normalizedAssigneeId = null;
+            } else {
+                const parsedAssigneeId = Number(assigneeId);
+                if (!Number.isInteger(parsedAssigneeId)) {
+                    return res.status(400).json({ message: "Invalid assigneeId" });
+                }
+
+                const assigneeMembership = await prisma.teamMember.findUnique({
+                    where: {
+                        userId_teamId: {
+                            userId: parsedAssigneeId,
+                            teamId: task.teamId
+                        }
+                    }
+                });
+
+                if (!assigneeMembership || assigneeMembership.status !== 'Active') {
+                    return res.status(400).json({ message: "Assignee must be an active member of the team" });
+                }
+
+                normalizedAssigneeId = parsedAssigneeId;
+            }
+        }
+
         const updatedTask = await prisma.task.update({
             where: { id: parseInt(taskId) },
             data: {
@@ -137,7 +198,10 @@ export const updateTask = async (req, res) => {
                 status: status !== undefined ? status : undefined,
                 priority: priority !== undefined ? priority : undefined,
                 dueDate: dueDate ? new Date(dueDate) : (dueDate === null ? null : undefined),
-                assigneeId: assigneeId !== undefined ? assigneeId : undefined
+                assigneeId: normalizedAssigneeId
+            },
+            include: {
+                assignee: { select: { id: true, name: true } }
             }
         });
 
@@ -152,6 +216,14 @@ export const updateTask = async (req, res) => {
                 task.teamId,
                 task.id
             );
+
+            io.to(`user_${assignee}`).emit('new_notification', {
+                type: 'task_updated',
+                message: `${updater.name} updated task: ${task.title}`,
+                teamId: task.teamId,
+                taskId: task.id
+            });
+
             io.to(`user_${assignee}`).emit('task_updated', {
                 task: updatedTask,
                 teamId: task.teamId
@@ -211,6 +283,14 @@ export const deleteTask = async (req, res) => {
                 `${deleter.name} deleted task: ${task.title}`,
                 task.teamId
             );
+
+            io.to(`user_${task.assigneeId}`).emit('new_notification', {
+                type: 'task_deleted',
+                message: `${deleter.name} deleted task: ${task.title}`,
+                teamId: task.teamId,
+                taskId: task.id
+            });
+
             io.to(`user_${task.assigneeId}`).emit('task_deleted', {
                 taskId: task.id,
                 teamId: task.teamId

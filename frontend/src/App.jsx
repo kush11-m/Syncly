@@ -21,29 +21,61 @@ function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    const savedUser = localStorage.getItem("user");
-    if (token) {
-      if (savedUser) {
+    let cancelled = false;
+
+    const bootstrapAuth = async () => {
+      const token = localStorage.getItem("token");
+      const savedUserRaw = localStorage.getItem("user");
+
+      if (!token) {
+        if (!cancelled) {
+          setUser(null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      let cachedUser = null;
+      if (savedUserRaw) {
         try {
-          setUser({ token, ...JSON.parse(savedUser) });
+          cachedUser = JSON.parse(savedUserRaw);
         } catch (error) {
           console.error("Failed to parse user data:", error);
           localStorage.removeItem("user");
-          localStorage.removeItem("token");
-          setUser(null);
         }
-      } else {
-        setUser({
-          token,
-          id: "user-1",
-          name: "Kushagra",
-          username: "kushagra",
-          role: "admin"
-        });
       }
-    }
-    setLoading(false);
+
+      if (!cancelled && cachedUser) {
+        setUser({ token, ...cachedUser });
+      }
+
+      try {
+        const res = await fetch(`${env.BACKEND_URL}/api/me`, {
+          headers: { Authorization: token }
+        });
+
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          if (!cancelled) setUser(null);
+        } else if (res.ok) {
+          const data = await res.json();
+          if (data?.user) {
+            localStorage.setItem("user", JSON.stringify(data.user));
+            if (!cancelled) setUser({ token, ...data.user });
+          }
+        }
+      } catch (_error) {
+        // Network issues shouldn't force logout; rely on cached user if present.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    bootstrapAuth();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = (token, userData) => {
@@ -167,7 +199,7 @@ function AnimatedRoutes() {
 }
 
 function LegacyTeamRouteRedirect({ settings = false }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { projectId, teamId } = useParams();
   const [target, setTarget] = useState("");
 
@@ -185,6 +217,12 @@ function LegacyTeamRouteRedirect({ settings = false }) {
         const res = await fetch(`${env.BACKEND_URL}/api/teams/${legacyTeamId}`, {
           headers: { Authorization: user.token }
         });
+
+        if (res.status === 401) {
+          logout();
+          if (mounted) setTarget("/auth/login");
+          return;
+        }
 
         if (!res.ok) {
           if (mounted) setTarget("/teams");

@@ -1,8 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
-import pg from 'pg';
-const { Pool } = pg;
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
@@ -25,8 +23,7 @@ if (!connectionString) {
 	);
 }
 
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
+const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
 export default prisma;

@@ -8,7 +8,7 @@ import BackgroundWave from "../components/BackgroundWave";
 
 export default function JoinTeam() {
     const { teamId } = useParams();
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const [status, setStatus] = useState("joining");
@@ -30,6 +30,12 @@ export default function JoinTeam() {
                     },
                     body: JSON.stringify({ teamId })
                 });
+
+                if (response.status === 401) {
+                    logout();
+                    navigate("/auth/login", { replace: true, state: { from: location } });
+                    return;
+                }
 
                 const data = await response.json();
 

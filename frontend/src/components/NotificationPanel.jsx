@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { X, Check, UserPlus, Trash2, Edit3, CheckCircle } from "lucide-react";
 import { env } from "../config";
+import { useAuth } from "../App";
 
 export default function NotificationPanel({ isOpen, onClose, user, onNotificationClick, socket, onUnreadCountChange }) {
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
+    const { logout } = useAuth();
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (isOpen && user) {
@@ -36,6 +40,11 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
             const res = await fetch(`${env.BACKEND_URL}/api/notifications`, {
                 headers: { 'Authorization': user?.token }
             });
+            if (res.status === 401) {
+                logout();
+                navigate('/auth/login', { replace: true });
+                return;
+            }
             if (res.ok) {
                 const data = await res.json();
                 setNotifications(data.notifications || []);
@@ -49,10 +58,15 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
 
     const markAsRead = async (notificationId) => {
         try {
-            await fetch(`${env.BACKEND_URL}/api/notifications/${notificationId}/read`, {
+            const res = await fetch(`${env.BACKEND_URL}/api/notifications/${notificationId}/read`, {
                 method: 'PUT',
                 headers: { 'Authorization': user?.token }
             });
+            if (res.status === 401) {
+                logout();
+                navigate('/auth/login', { replace: true });
+                return;
+            }
             setNotifications(prev => {
                 const updated = prev.map(n => n.id === notificationId ? { ...n, read: true } : n);
                 // Update parent's unread count
@@ -69,10 +83,15 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
 
     const markAllAsRead = async () => {
         try {
-            await fetch(`${env.BACKEND_URL}/api/notifications/read-all`, {
+            const res = await fetch(`${env.BACKEND_URL}/api/notifications/read-all`, {
                 method: 'PUT',
                 headers: { 'Authorization': user?.token }
             });
+            if (res.status === 401) {
+                logout();
+                navigate('/auth/login', { replace: true });
+                return;
+            }
             setNotifications(prev => {
                 const updated = prev.map(n => ({ ...n, read: true }));
                 // Update parent's unread count to 0
@@ -88,10 +107,15 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
 
     const deleteNotification = async (notificationId) => {
         try {
-            await fetch(`${env.BACKEND_URL}/api/notifications/${notificationId}`, {
+            const res = await fetch(`${env.BACKEND_URL}/api/notifications/${notificationId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': user?.token }
             });
+            if (res.status === 401) {
+                logout();
+                navigate('/auth/login', { replace: true });
+                return;
+            }
             setNotifications(prev => {
                 const updated = prev.filter(n => n.id !== notificationId);
                 // Update parent's unread count

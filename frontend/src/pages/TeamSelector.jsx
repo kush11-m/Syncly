@@ -8,7 +8,7 @@ import BackgroundWave from "../components/BackgroundWave";
 import { getTeamPath, getTeamSlug, getUserSlug } from "../utils/teamUrl";
 
 export default function TeamSelector() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const [teams, setTeams] = useState([]);
@@ -28,6 +28,12 @@ export default function TeamSelector() {
         const res = await fetch(`${env.BACKEND_URL}/api/teams`, {
           headers: { Authorization: user.token },
         });
+
+        if (res.status === 401) {
+          logout();
+          navigate('/auth/login', { replace: true });
+          return;
+        }
 
         const data = await res.json();
 
@@ -69,6 +75,12 @@ export default function TeamSelector() {
         },
         body: JSON.stringify({ name: newTeamName.trim() }),
       });
+
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       const data = await res.json();
 

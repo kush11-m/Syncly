@@ -307,17 +307,27 @@ export const updateMemberRole = async (req, res) => {
     const { teamId, memberId, role } = req.body;
     const userId = req.user.userId;
 
+    console.log("=== ROLE UPDATE DEBUG ===");
+    console.log("Request body:", { teamId, memberId, role });
+    console.log("userId from token:", userId, typeof userId);
+
     try {
         const team = await prisma.team.findUnique({ where: { id: teamId } });
         if (!team) {
+            console.log("Team not found for id:", teamId);
             return res.status(404).json({ message: "Team not found" });
         }
+
+        console.log("team.adminId:", team.adminId, typeof team.adminId);
 
         const requester = await prisma.teamMember.findUnique({
             where: { userId_teamId: { userId, teamId } }
         });
 
+        console.log("requester:", requester);
+
         const isOwner = team.adminId === userId;
+        console.log("isOwner:", isOwner, `(${team.adminId} === ${userId})`);
 
         if (!requester || (!isOwner && requester.role?.toLowerCase() !== 'admin')) {
             return res.status(403).json({ message: "Not authorized. Only the team owner or admins can change roles." });

@@ -96,7 +96,7 @@ export default function Dashboard({ openSettings = false }) {
 
       if (teamsRes.status === 401) {
         logout();
-        navigate('/');
+        navigate('/auth/login', { replace: true });
         return;
       }
 
@@ -135,6 +135,12 @@ export default function Dashboard({ openSettings = false }) {
         headers: { 'Authorization': user?.token }
       });
 
+      if (teamRes.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
+
       if (teamRes.ok) {
         const teamData = await teamRes.json();
         // Transform members to flatten the structure
@@ -155,6 +161,12 @@ export default function Dashboard({ openSettings = false }) {
       const tasksRes = await fetch(`${env.BACKEND_URL}/api/tasks/team/${activeTeamId}`, {
         headers: { 'Authorization': user?.token }
       });
+
+      if (tasksRes.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       if (tasksRes.ok) {
         const tasksData = await tasksRes.json();
@@ -372,6 +384,11 @@ export default function Dashboard({ openSettings = false }) {
         const res = await fetch(`${env.BACKEND_URL}/api/notifications`, {
           headers: { 'Authorization': user?.token }
         });
+        if (res.status === 401) {
+          logout();
+          navigate('/auth/login', { replace: true });
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           setUnreadCount(data.notifications.filter(n => !n.read).length);
@@ -408,12 +425,19 @@ export default function Dashboard({ openSettings = false }) {
           title: taskData.content,
           description: taskData.description,
           teamId: team.id,
+          assigneeId: taskData.assigneeId ?? null,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
           status: taskData.status === 'todo' ? 'To Do' :
             taskData.status === 'inprogress' ? 'In Progress' : 'Done'
         })
       });
+
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       if (res.ok) {
         fetchTeamAndTasks();
@@ -452,9 +476,16 @@ export default function Dashboard({ openSettings = false }) {
           description: taskData.description,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
-          status: backendStatus
+          status: backendStatus,
+          assigneeId: taskData.assigneeId ?? undefined
         })
       });
+
+      if (response.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -484,12 +515,18 @@ export default function Dashboard({ openSettings = false }) {
     });
 
     try {
-      await fetch(`${env.BACKEND_URL}/api/tasks/${taskId}`, {
+      const res = await fetch(`${env.BACKEND_URL}/api/tasks/${taskId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': user?.token
         }
       });
+
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
     } catch (error) {
       console.error("Error deleting task:", error);
     }
@@ -593,6 +630,12 @@ export default function Dashboard({ openSettings = false }) {
         body: JSON.stringify({ name: teamName })
       });
 
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
+
       if (res.ok) {
         const data = await res.json();
         setTeam(data.team);
@@ -616,6 +659,12 @@ export default function Dashboard({ openSettings = false }) {
         body: JSON.stringify({ teamId: team.id, memberId })
       });
 
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
+
       if (res.ok) {
         fetchTeamAndTasks();
       }
@@ -635,6 +684,12 @@ export default function Dashboard({ openSettings = false }) {
         },
         body: JSON.stringify({ teamId: team.id, memberId })
       });
+
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       if (res.ok) {
         fetchTeamAndTasks();
@@ -666,6 +721,12 @@ export default function Dashboard({ openSettings = false }) {
         },
         body: JSON.stringify({ teamId: team.id, memberId, role: newRole })
       });
+
+      if (res.status === 401) {
+        logout();
+        navigate('/auth/login', { replace: true });
+        return;
+      }
 
       if (!res.ok) {
         const data = await res.json();
@@ -961,6 +1022,7 @@ export default function Dashboard({ openSettings = false }) {
         task={editingTask}
         initialDate={selectedDate}
         initialStatus={targetColumn}
+        teamMembers={(team?.members || []).filter((m) => m.status === 'Active')}
       />
 
       <TeamModal
@@ -1075,10 +1137,23 @@ function CalendarView({ tasks, currentDate, onDateChange, onDateClick, onTaskCli
   const monthEnd = endOfMonth(currentDate);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
+  const toDateKey = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    if (typeof value === 'string') {
+      const isoPrefix = value.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(isoPrefix)) return isoPrefix;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return format(parsed, 'yyyy-MM-dd');
+  };
+
   const tasksByDate = Object.values(tasks).reduce((acc, task) => {
-    const date = task.dueDate;
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(task);
+    const dateKey = toDateKey(task?.dueDate);
+    if (!dateKey) return acc;
+    if (!acc[dateKey]) acc[dateKey] = [];
+    acc[dateKey].push(task);
     return acc;
   }, {});
 

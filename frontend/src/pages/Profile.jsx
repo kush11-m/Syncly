@@ -18,6 +18,11 @@ export default function Profile() {
                 const res = await fetch(`${env.BACKEND_URL}/api/teams`, {
                     headers: { 'Authorization': user?.token }
                 });
+                if (res.status === 401) {
+                    logout();
+                    navigate('/auth/login', { replace: true });
+                    return;
+                }
                 if (res.ok) {
                     const data = await res.json();
                     setTeams(data.teams);

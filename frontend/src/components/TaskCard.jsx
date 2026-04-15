@@ -20,8 +20,14 @@ const getPriorityColor = (priority) => {
 };
 
 export default function TaskCard({ task, index, onClick, onDelete, onAdvance, onRegress }) {
-    const isDone = task.status === 'done';
-    const isTodo = task.status === 'todo' || !task.status;
+    const status = task?.status;
+    const isDone = status === 'done' || status === 'Done';
+    const isTodo = status === 'todo' || status === 'To Do' || !status;
+
+    const assigneeName =
+        typeof task?.assignee === 'string'
+            ? task.assignee
+            : task?.assignee?.name;
     
     return (
         <Draggable draggableId={String(task.id)} index={index}>
@@ -107,12 +113,12 @@ export default function TaskCard({ task, index, onClick, onDelete, onAdvance, on
                                 {task.dueDate ? new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
                             </span>
 
-                            {task.assignee && (
+                            {assigneeName && (
                                 <div
                                     className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border shadow-sm bg-zinc-800 text-white border-zinc-700"
-                                    title={task.assignee}
+                                    title={assigneeName}
                                 >
-                                    {getInitials(task.assignee)}
+                                    {getInitials(assigneeName)}
                                 </div>
                             )}
                         </div>
