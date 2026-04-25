@@ -11,7 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 8000;
 
 // Create HTTP server and attach Socket.IO
 const httpServer = createServer(app);
@@ -36,6 +36,9 @@ io.on('connection', (socket) => {
         console.log('User disconnected:', socket.id);
     });
 });
+
+app.get('/', (req, res) => res.send('Syncly API is running'));
+app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 app.use('/api', userRoutes);
 app.use('/api/teams', teamRoutes);

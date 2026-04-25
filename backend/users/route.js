@@ -4,10 +4,11 @@ import { isAuthenticated } from "../auth/middleware.js";
 
 const router = Router();
 
-router.route('/signup').post(signup);
-router.route('/login').post(login);
-router.route('/test-login').post(testLogin);
-router.route('/me').get(isAuthenticated, getMe).put(isAuthenticated, updateMe);
-router.route('/users').get(isAuthenticated, getUsers);
+router.post('/signup', signup);
+router.post('/login', login);
+router.post('/test-login', testLogin);
+router.get('/me', isAuthenticated, getMe);
+router.put('/me', isAuthenticated, updateMe);
+router.get('/users', isAuthenticated, getUsers);
 
 export const userRoutes = router;
