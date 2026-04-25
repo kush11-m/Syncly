@@ -28,7 +28,7 @@ export default function LandingPage() {
             }
         } catch (err) {
             if (err.name === 'TypeError' && err.message.includes('fetch')) {
-                alert("Could not connect to the server. Please wait a few seconds for the backend to finish starting up and try again.");
+                alert("Unable to connect to the server. Please ensure the backend is running and try again.");
             } else {
                 alert("An error occurred during test drive. Please try again.");
             }
