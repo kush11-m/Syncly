@@ -41,6 +41,28 @@ export default function Login() {
     }
   };
 
+  const handleTestDrive = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch(`${env.BACKEND_URL}/api/test-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        login(data.token, data.user);
+        navigate("/teams");
+      } else {
+        setError(data.message || "Test drive failed");
+      }
+    } catch (_err) {
+      setError("An error occurred during test drive. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="app-page flex flex-col items-center justify-center p-4">
       <BackgroundWave opacity={0.4} />
@@ -111,6 +133,20 @@ export default function Login() {
             <span className="relative z-10">{loading ? "Logging in..." : "Sign in"}</span>
           </motion.button>
         </form>
+
+        <div className="mt-6 flex items-center my-4 before:flex-1 before:border-t before:border-white/10 before:mr-6 after:flex-1 after:border-t after:border-white/10 after:ml-6">
+          <span className="text-zinc-500 text-sm">OR</span>
+        </div>
+
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={handleTestDrive}
+          disabled={loading}
+          className="app-btn-ghost w-full py-4 text-lg disabled:opacity-70 disabled:cursor-not-allowed border border-orange-500/20 hover:border-orange-500/50"
+        >
+          <span className="relative z-10 text-orange-400">{loading ? "Creating..." : "Recruiter Test Drive"}</span>
+        </motion.button>
 
         <div className="mt-8 text-center text-sm">
           <span className="text-zinc-500">Don't have an account? </span>

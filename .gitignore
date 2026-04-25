@@ -25,3 +25,6 @@ dist-ssr
 .env
 .env.*
 **/.env
+
+# Personal-only docs (do not commit)
+PERSONAL_PROJECT_DOC.md

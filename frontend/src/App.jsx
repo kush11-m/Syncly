@@ -79,6 +79,13 @@ function AuthProvider({ children }) {
   }, []);
 
   const login = (token, userData) => {
+    const isTest = userData?.isTest;
+    
+    if (isTest) {
+      setUser({ token, ...userData });
+      return;
+    }
+
     localStorage.setItem("token", token);
     if (userData) {
       localStorage.setItem("user", JSON.stringify(userData));

@@ -1,13 +1,41 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../App";
 import { ArrowRight, Zap, Users, Clock, GitBranch } from "lucide-react";
 import { motion } from "framer-motion";
 import BackgroundWave from "../components/BackgroundWave";
 import Navbar from "../components/Navbar";
+import { env } from "../config";
 
 export default function LandingPage() {
-    const { user } = useAuth();
+    const { user, login } = useAuth();
+    const navigate = useNavigate();
+    const [loading, setLoading] = useState(false);
 
+    const handleTestDrive = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch(`${env.BACKEND_URL}/api/test-login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+            });
+            const data = await res.json();
+            if (res.ok) {
+                login(data.token, data.user);
+                navigate("/teams");
+            } else {
+                alert(data.message || "Test drive failed");
+            }
+        } catch (err) {
+            if (err.name === 'TypeError' && err.message.includes('fetch')) {
+                alert("Could not connect to the server. Please wait a few seconds for the backend to finish starting up and try again.");
+            } else {
+                alert("An error occurred during test drive. Please try again.");
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
     return (
         <div className="app-page font-sans">
             <BackgroundWave opacity={0.4} />
@@ -78,6 +106,15 @@ export default function LandingPage() {
                                             Sign In
                                         </motion.button>
                                     </Link>
+                                    <motion.button
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={handleTestDrive}
+                                        disabled={loading}
+                                        className="w-full sm:w-auto px-8 py-4 text-lg rounded-xl font-medium transition-all border border-orange-500/20 text-orange-400 hover:border-orange-500/50 hover:bg-orange-500/5 disabled:opacity-70"
+                                    >
+                                        {loading ? "Creating..." : "Try Demo (No Signup)"}
+                                    </motion.button>
                                 </>
                             )}
                         </div>

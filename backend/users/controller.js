@@ -192,3 +192,85 @@ export const updateMe = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
+export const testLogin = async (req, res) => {
+    try {
+        const email = "test_recruiter@syncly.com";
+        const username = "test_recruiter";
+        const name = "Recruiter Evaluator";
+
+        let testUser = await prisma.user.findUnique({ where: { email } });
+        
+        if (!testUser) {
+            const password = await bcrypt.hash("test_password_123", 10);
+            testUser = await prisma.user.create({
+                data: { name, username, email, password },
+            });
+        }
+
+        // Dummy users
+        const dummy1Email = "dummy1@syncly.com";
+        let dummy1 = await prisma.user.findUnique({ where: { email: dummy1Email } });
+        if (!dummy1) {
+            const password = await bcrypt.hash("dummy_pass", 10);
+            dummy1 = await prisma.user.create({ data: { name: "Alex Designer", username: "alex_design", email: dummy1Email, password } });
+        }
+
+        const dummy2Email = "dummy2@syncly.com";
+        let dummy2 = await prisma.user.findUnique({ where: { email: dummy2Email } });
+        if (!dummy2) {
+            const password = await bcrypt.hash("dummy_pass", 10);
+            dummy2 = await prisma.user.create({ data: { name: "Sam Developer", username: "sam_dev", email: dummy2Email, password } });
+        }
+
+        // Clean up previous workspaces
+        const previousTeams = await prisma.team.findMany({ where: { adminId: testUser.id } });
+        const previousTeamIds = previousTeams.map(t => t.id);
+
+        if (previousTeamIds.length > 0) {
+            await prisma.task.deleteMany({ where: { teamId: { in: previousTeamIds } } });
+            await prisma.teamMember.deleteMany({ where: { teamId: { in: previousTeamIds } } });
+            await prisma.team.deleteMany({ where: { id: { in: previousTeamIds } } });
+        }
+
+        const newTeam = await prisma.team.create({
+            data: {
+                name: "Syncly Demo Workspace",
+                adminId: testUser.id,
+                members: {
+                    create: [
+                        { userId: testUser.id, role: 'Admin', status: 'Active' },
+                        { userId: dummy1.id, role: 'Member', status: 'Active' },
+                        { userId: dummy2.id, role: 'Member', status: 'Active' }
+                    ]
+                }
+            }
+        });
+
+        const today = new Date();
+        const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+        const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+
+        await prisma.task.createMany({
+            data: [
+                { title: "Explore Syncly Interface", description: "Look around the dashboard and check out the sidebar.", status: "Done", priority: "Low", teamId: newTeam.id, assigneeId: testUser.id, dueDate: yesterday },
+                { title: "Drag and Drop a Task", description: "Try moving a task across different columns.", status: "In Progress", priority: "High", teamId: newTeam.id, assigneeId: dummy1.id, dueDate: today },
+                { title: "Invite a Team Member", description: "Go to team settings and add a new user to collaborate.", status: "To Do", priority: "Medium", teamId: newTeam.id, assigneeId: null, dueDate: tomorrow },
+                { title: "Review UI Aesthetics", description: "Verify glassmorphism and animations.", status: "To Do", priority: "High", teamId: newTeam.id, assigneeId: dummy2.id, dueDate: today },
+            ]
+        });
+
+        const token = jwt.sign({ userId: testUser.id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+        
+        const clientUser = formatUserForClient(testUser);
+        clientUser.isTest = true;
+
+        res.status(200).json({
+            token,
+            user: clientUser
+        });
+    } catch (error) {
+        console.error("Test login error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
