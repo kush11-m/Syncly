@@ -200,6 +200,8 @@ export default function Dashboard({ openSettings = false }) {
     fetchTeamAndTasks();
   }, [teamSlug, user]);
 
+  const pusherRef = useRef(null);
+
   // Pusher connection setup
   useEffect(() => {
     if (!user) return;
@@ -211,13 +213,28 @@ export default function Dashboard({ openSettings = false }) {
       return;
     }
 
+    // Clean up previous instance if it exists
+    if (pusherRef.current) {
+      pusherRef.current.disconnect();
+    }
+
     const pusher = new Pusher(env.PUSHER_KEY, {
       cluster: env.PUSHER_CLUSTER,
       forceTLS: true
     });
 
+    pusherRef.current = pusher;
+
     const channel = pusher.subscribe(`user_${user.id}`);
-    setIsConnected(true);
+    
+    pusher.connection.bind('connected', () => {
+      console.log('Pusher Connected');
+      setIsConnected(true);
+    });
+
+    pusher.connection.bind('disconnected', () => {
+      setIsConnected(false);
+    });
 
     // Listen for team updates
     channel.bind('team_updated', ({ teamId }) => {
@@ -338,10 +355,13 @@ export default function Dashboard({ openSettings = false }) {
     setSocket(pusher);
 
     return () => {
-      pusher.unsubscribe(`user_${user.id}`);
-      pusher.disconnect();
+      if (pusherRef.current) {
+        pusherRef.current.disconnect();
+        pusherRef.current = null;
+      }
     };
   }, [user, team?.id]);
+
 
 
   useEffect(() => {

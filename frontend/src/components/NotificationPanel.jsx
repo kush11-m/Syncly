@@ -31,7 +31,9 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
         channel.bind('new_notification', handleNewNotification);
 
         return () => {
-            channel.unbind('new_notification', handleNewNotification);
+            if (socket.connection.state === 'connected') {
+                channel.unbind('new_notification', handleNewNotification);
+            }
         };
     }, [socket, isOpen, user]);
 
