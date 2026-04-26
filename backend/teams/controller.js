@@ -1,6 +1,6 @@
 import prisma from '../utils/db.js';
 import { createNotification } from '../notifications/controller.js';
-import { io } from '../server.js';
+import { pusher } from '../server.js';
 
 export const createTeam = async (req, res) => {
     const { name } = req.body;
@@ -102,7 +102,7 @@ export const joinTeam = async (req, res) => {
                 normalizedTeamId
             );
 
-            io.to(`user_${team.adminId}`).emit('new_notification', {
+            await pusher.trigger(`user_${team.adminId}`, 'new_notification', {
                 type: 'member_joined',
                 message: `${user.name} joined ${team.name}`,
                 teamId: normalizedTeamId
@@ -114,7 +114,7 @@ export const joinTeam = async (req, res) => {
         });
 
         for (const member of activeMembers) {
-            io.to(`user_${member.userId}`).emit('team_updated', { teamId: normalizedTeamId });
+            await pusher.trigger(`user_${member.userId}`, 'team_updated', { teamId: normalizedTeamId });
         }
 
         res.status(200).json({
@@ -214,7 +214,7 @@ export const approveMember = async (req, res) => {
         );
 
         // Emit real-time notification to approved user
-        io.to(`user_${member.userId}`).emit('new_notification', {
+        await pusher.trigger(`user_${member.userId}`, 'new_notification', {
             type: 'member_approved',
             message: `Your request to join ${member.team.name} has been approved`,
             teamId
@@ -233,7 +233,7 @@ export const approveMember = async (req, res) => {
                 teamId
             );
             // Emit real-time notification
-            io.to(`user_${activeMember.userId}`).emit('new_notification', {
+            await pusher.trigger(`user_${activeMember.userId}`, 'new_notification', {
                 type: 'member_joined',
                 message: `${member.user.name} joined ${member.team.name}`,
                 teamId
@@ -245,7 +245,7 @@ export const approveMember = async (req, res) => {
             where: { teamId, status: 'Active' }
         });
         for (const m of allMembers) {
-            io.to(`user_${m.userId}`).emit('team_updated', { teamId });
+            await pusher.trigger(`user_${m.userId}`, 'team_updated', { teamId });
         }
 
         res.status(200).json({ message: "Member approved" });
@@ -287,14 +287,14 @@ export const rejectMember = async (req, res) => {
         );
 
         // Emit real-time notification to rejected user
-        io.to(`user_${member.userId}`).emit('new_notification', {
+        await pusher.trigger(`user_${member.userId}`, 'new_notification', {
             type: 'member_rejected',
             message: `Your request to join ${member.team.name} was declined`,
             teamId
         });
 
         // Emit team update event to admin
-        io.to(`user_${userId}`).emit('team_updated', { teamId });
+        await pusher.trigger(`user_${userId}`, 'team_updated', { teamId });
 
         res.status(200).json({ message: "Member rejected" });
     } catch (error) {
@@ -370,7 +370,7 @@ export const updateMemberRole = async (req, res) => {
             where: { teamId, status: 'Active' }
         });
         for (const m of allMembers) {
-            io.to(`user_${m.userId}`).emit('team_updated', { teamId });
+            await pusher.trigger(`user_${m.userId}`, 'team_updated', { teamId });
         }
 
         res.status(200).json({ message: "Member role updated successfully", member: updatedMember });

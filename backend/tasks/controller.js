@@ -1,6 +1,6 @@
 import prisma from '../utils/db.js';
 import { createNotification } from '../notifications/controller.js';
-import { io } from '../server.js';
+import { pusher } from '../server.js';
 
 export const createTask = async (req, res) => {
     const { title, description, teamId, assigneeId, priority, dueDate } = req.body;
@@ -72,14 +72,14 @@ export const createTask = async (req, res) => {
                 newTask.id
             );
 
-            io.to(`user_${normalizedAssigneeId}`).emit('new_notification', {
+            await pusher.trigger(`user_${normalizedAssigneeId}`, 'new_notification', {
                 type: 'task_created',
                 message: `${creator.name} assigned you a task: ${title}`,
                 teamId,
                 taskId: newTask.id
             });
 
-            io.to(`user_${normalizedAssigneeId}`).emit('task_created', {
+            await pusher.trigger(`user_${normalizedAssigneeId}`, 'task_created', {
                 task: newTask,
                 teamId
             });
@@ -92,7 +92,7 @@ export const createTask = async (req, res) => {
         for (const member of allMembers) {
             // Skip assignee since we already notified them above
             if (normalizedAssigneeId && member.userId === normalizedAssigneeId) continue;
-            io.to(`user_${member.userId}`).emit('task_created', {
+            await pusher.trigger(`user_${member.userId}`, 'task_created', {
                 task: newTask,
                 teamId
             });
@@ -217,14 +217,14 @@ export const updateTask = async (req, res) => {
                 task.id
             );
 
-            io.to(`user_${assignee}`).emit('new_notification', {
+            await pusher.trigger(`user_${assignee}`, 'new_notification', {
                 type: 'task_updated',
                 message: `${updater.name} updated task: ${task.title}`,
                 teamId: task.teamId,
                 taskId: task.id
             });
 
-            io.to(`user_${assignee}`).emit('task_updated', {
+            await pusher.trigger(`user_${assignee}`, 'task_updated', {
                 task: updatedTask,
                 teamId: task.teamId
             });
@@ -236,7 +236,7 @@ export const updateTask = async (req, res) => {
         });
         for (const member of allMembers) {
             if (member.userId === assignee) continue;
-            io.to(`user_${member.userId}`).emit('task_updated', {
+            await pusher.trigger(`user_${member.userId}`, 'task_updated', {
                 task: updatedTask,
                 teamId: task.teamId
             });
@@ -284,14 +284,14 @@ export const deleteTask = async (req, res) => {
                 task.teamId
             );
 
-            io.to(`user_${task.assigneeId}`).emit('new_notification', {
+            await pusher.trigger(`user_${task.assigneeId}`, 'new_notification', {
                 type: 'task_deleted',
                 message: `${deleter.name} deleted task: ${task.title}`,
                 teamId: task.teamId,
                 taskId: task.id
             });
 
-            io.to(`user_${task.assigneeId}`).emit('task_deleted', {
+            await pusher.trigger(`user_${task.assigneeId}`, 'task_deleted', {
                 taskId: task.id,
                 teamId: task.teamId
             });
@@ -303,7 +303,7 @@ export const deleteTask = async (req, res) => {
         });
         for (const member of allMembers) {
             if (member.userId === task.assigneeId) continue;
-            io.to(`user_${member.userId}`).emit('task_deleted', {
+            await pusher.trigger(`user_${member.userId}`, 'task_deleted', {
                 taskId: task.id,
                 teamId: task.teamId
             });

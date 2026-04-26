@@ -18,7 +18,7 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
 
     // Listen for real-time notifications
     useEffect(() => {
-        if (!socket) return;
+        if (!socket || !user) return;
 
         const handleNewNotification = async () => {
             // Refresh notifications when a new one arrives
@@ -27,12 +27,14 @@ export default function NotificationPanel({ isOpen, onClose, user, onNotificatio
             }
         };
 
-        socket.on('new_notification', handleNewNotification);
+        const channel = socket.subscribe(`user_${user.id}`);
+        channel.bind('new_notification', handleNewNotification);
 
         return () => {
-            socket.off('new_notification', handleNewNotification);
+            channel.unbind('new_notification', handleNewNotification);
         };
-    }, [socket, isOpen]);
+    }, [socket, isOpen, user]);
+
 
     const fetchNotifications = async () => {
         setLoading(true);

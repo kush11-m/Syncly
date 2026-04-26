@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
-import { io } from "socket.io-client";
+import Pusher from "pusher-js";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from "date-fns";
 import {
   Calendar as CalendarIcon, Kanban, Search, LogOut, Plus,
@@ -58,7 +58,7 @@ export default function Dashboard({ openSettings = false }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [boardRenderVersion, setBoardRenderVersion] = useState(0);
 
-  // Track pending drag updates to avoid processing socket events for local drags
+  // Track pending drag updates to avoid processing Pusher events for local drags
   const pendingDragUpdates = useRef(new Set());
 
   const normalizeTaskId = (taskId) => String(taskId);
@@ -200,67 +200,54 @@ export default function Dashboard({ openSettings = false }) {
     fetchTeamAndTasks();
   }, [teamSlug, user]);
 
-  // Socket.IO connection setup
+  // Pusher connection setup
   useEffect(() => {
     if (!user) return;
 
     const activeTeamId = team?.id ? String(team.id) : null;
 
-    const newSocket = io(env.BACKEND_URL, {
-      transports: ['websocket', 'polling']
+    if (!env.PUSHER_KEY) {
+      console.warn('Pusher key is missing. Real-time updates will not work.');
+      return;
+    }
+
+    const pusher = new Pusher(env.PUSHER_KEY, {
+      cluster: env.PUSHER_CLUSTER,
+      forceTLS: true
     });
 
-    newSocket.on('connect', () => {
-      console.log('Connected to Socket.IO');
-      setIsConnected(true);
-      // Join user's personal room for targeted notifications
-      newSocket.emit('join_room', user.id);
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from Socket.IO');
-      setIsConnected(false);
-    });
+    const channel = pusher.subscribe(`user_${user.id}`);
+    setIsConnected(true);
 
     // Listen for team updates
-    newSocket.on('team_updated', ({ teamId }) => {
+    channel.bind('team_updated', ({ teamId }) => {
       console.log('Team updated:', teamId);
-      // Refresh team data if it's the current team
       if (activeTeamId && String(teamId) === activeTeamId) {
         fetchTeamAndTasks();
       }
     });
 
     // Listen for new notifications
-    newSocket.on('new_notification', (notification) => {
+    channel.bind('new_notification', (notification) => {
       console.log('New notification:', notification);
       setUnreadCount(prev => prev + 1);
     });
 
     // Listen for task created
-    newSocket.on('task_created', ({ task, teamId }) => {
+    channel.bind('task_created', ({ task, teamId }) => {
       console.log('Task created:', task);
       if (activeTeamId && String(teamId) === activeTeamId) {
         const taskId = normalizeTaskId(task.id);
 
-        // Only add if task doesn't already exist (prevents duplication from own actions)
         setTasks(prev => {
-          if (prev[taskId]) {
-            console.log('Task already exists, skipping duplicate add');
-            return prev;
-          }
+          if (prev[taskId]) return prev;
           return { ...prev, [taskId]: { ...task, content: task.title } };
         });
 
-        // Add to appropriate column only if not already there
         const status = statusToColumnId(task.status);
-
         setColumns(prev => {
           const taskAlreadyInBoard = Object.values(prev).some(col => col.taskIds.includes(taskId));
-          if (taskAlreadyInBoard) {
-            console.log('Task already in board, skipping duplicate add');
-            return prev;
-          }
+          if (taskAlreadyInBoard) return prev;
 
           return {
             ...prev,
@@ -274,36 +261,25 @@ export default function Dashboard({ openSettings = false }) {
     });
 
     // Listen for task updated
-    newSocket.on('task_updated', ({ task, teamId }) => {
+    channel.bind('task_updated', ({ task, teamId }) => {
       console.log('Task updated:', task);
       if (activeTeamId && String(teamId) === activeTeamId) {
         const taskId = normalizeTaskId(task.id);
 
-        // Skip if this task is currently being dragged by this user
         if (pendingDragUpdates.current.has(taskId)) {
-          console.log('Skipping socket update for locally dragged task:', taskId);
+          console.log('Skipping Pusher update for locally dragged task:', taskId);
           return;
         }
 
-        // Calculate status outside of state updates to avoid closure issues
         const newStatus = statusToColumnId(task.status);
 
-        // First, update tasks state (just the task data)
         setTasks(prev => {
           const oldTask = prev[taskId];
-          if (!oldTask) {
-            console.log('Task not found for update, skipping');
-            return prev;
-          }
-          // Update task data with backend format
+          if (!oldTask) return prev;
           return { ...prev, [taskId]: { ...task, content: task.title } };
         });
 
-        // Then, update columns state SEPARATELY to avoid closure issues
-        console.log('=== SOCKET UPDATE START ===', task.id);
         setColumns(prevCols => {
-          console.log('Columns BEFORE socket update:', JSON.stringify(Object.keys(prevCols).reduce((acc, k) => ({ ...acc, [k]: prevCols[k].taskIds }), {})));
-          // First, find where the task currently is
           let currentColumn = null;
           for (const colId of Object.keys(prevCols)) {
             if (prevCols[colId].taskIds.includes(taskId)) {
@@ -312,13 +288,8 @@ export default function Dashboard({ openSettings = false }) {
             }
           }
 
-          // If task is already in the correct column, do nothing
-          if (currentColumn === newStatus) {
-            console.log('Task already in correct column, no update needed');
-            return prevCols;
-          }
+          if (currentColumn === newStatus) return prevCols;
 
-          // DEFENSIVE: Remove task from ALL columns first
           const cleanedColumns = {};
           Object.keys(prevCols).forEach(colId => {
             cleanedColumns[colId] = {
@@ -327,36 +298,30 @@ export default function Dashboard({ openSettings = false }) {
             };
           });
 
-          // Add task to correct column
           cleanedColumns[newStatus] = {
             ...cleanedColumns[newStatus],
             taskIds: [...cleanedColumns[newStatus].taskIds, taskId]
           };
 
-          console.log('Columns AFTER socket update:', JSON.stringify(Object.keys(cleanedColumns).reduce((acc, k) => ({ ...acc, [k]: cleanedColumns[k].taskIds }), {})));
-          console.log(`=== SOCKET UPDATE END: Moved task ${task.id} from ${currentColumn} to ${newStatus} ===`);
           return cleanedColumns;
         });
 
-        // Force board remount after remote updates to reset DnD internals cleanly.
         forceBoardRerender();
       }
     });
 
     // Listen for task deleted
-    newSocket.on('task_deleted', ({ taskId, teamId }) => {
+    channel.bind('task_deleted', ({ taskId, teamId }) => {
       console.log('Task deleted:', taskId);
       if (activeTeamId && String(teamId) === activeTeamId) {
         const normalizedTaskId = normalizeTaskId(taskId);
 
-        // Remove from tasks
         setTasks(prev => {
           const newTasks = { ...prev };
           delete newTasks[normalizedTaskId];
           return newTasks;
         });
 
-        // Remove from columns
         setColumns(prev => {
           const newColumns = { ...prev };
           Object.keys(newColumns).forEach(colId => {
@@ -370,12 +335,14 @@ export default function Dashboard({ openSettings = false }) {
       }
     });
 
-    setSocket(newSocket);
+    setSocket(pusher);
 
     return () => {
-      newSocket.disconnect();
+      pusher.unsubscribe(`user_${user.id}`);
+      pusher.disconnect();
     };
   }, [user, team?.id]);
+
 
   useEffect(() => {
     const fetchUnreadCount = async () => {
@@ -576,7 +543,7 @@ export default function Dashboard({ openSettings = false }) {
     // 4. Persist to backend - pass task with internal format status for handleUpdateTask
     handleUpdateTask({ ...task, status: destStatus, content: task.content || task.title });
 
-    // Remove from pending after a delay to ensure socket event is ignored
+    // Remove from pending after a delay to ensure Pusher event is ignored
     setTimeout(() => {
       pendingDragUpdates.current.delete(taskId);
     }, 1000);
@@ -764,7 +731,7 @@ export default function Dashboard({ openSettings = false }) {
       console.log('=== LOCAL DRAG START ===', taskId);
       console.log('Columns BEFORE drag:', JSON.stringify(Object.keys(columns).reduce((acc, k) => ({ ...acc, [k]: columns[k].taskIds }), {})));
 
-      // Moving between columns - mark as pending to avoid socket duplicate processing
+      // Moving between columns - mark as pending to avoid Pusher duplicate processing
       pendingDragUpdates.current.add(taskId);
 
       // DEFENSIVE: Remove task from ALL columns first to prevent duplicates
@@ -814,7 +781,7 @@ export default function Dashboard({ openSettings = false }) {
         content: task.content || task.title
       });
 
-      // Remove from pending after a delay to ensure socket event is ignored
+      // Remove from pending after a delay to ensure Pusher event is ignored
       setTimeout(() => {
         pendingDragUpdates.current.delete(taskId);
       }, 1000);

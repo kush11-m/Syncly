@@ -23,7 +23,7 @@ Designed with a premium glassmorphic UI, robust role-based access control, and a
 
 ## ✨ Key Features
 
-- **⚡ Real-Time Synchronization:** Sub-millisecond task updates, drag-and-drop movements, and notifications powered by Socket.IO.
+- **⚡ Real-Time Synchronization:** Sub-millisecond task updates, drag-and-drop movements, and notifications powered by **Pusher** (optimized for serverless environments like Vercel).
 - **🚀 Recruiter Test Drive (Zero-Friction Demo):** Instantly spin up a sandboxed environment pre-populated with dummy users, active tasks, and calendar dates—no signup required.
 - **🛡️ Role-Based Access Control (RBAC):** Granular permissions supporting `Admin`, `Member`, and `Viewer` roles.
 - **📊 Dynamic Visualizations:** Switch seamlessly between interactive Kanban Boards and Calendar Views.
@@ -48,7 +48,7 @@ graph TD
 
     %% Backend Services
     API[Express REST API]
-    WS[Socket.IO Server]
+    Pusher[Pusher Managed Service]
 
     %% Database Layer
     Prisma[Prisma ORM]
@@ -58,26 +58,25 @@ graph TD
     ClientA -->|Static Assets| Vercel
     ClientB -->|Static Assets| Vercel
 
-    ClientA <-->|WS Events| WS
-    ClientB <-->|WS Events| WS
+    ClientA <|--| Pusher
+    ClientB <|--| Pusher
 
     ClientA -->|HTTP Requests| API
     ClientB -->|HTTP Requests| API
 
+    API --> Pusher
     API --> Prisma
-    WS --> Prisma
     Prisma --> PG
 
     subgraph Backend Infrastructure
         Railway
         API
-        WS
         Prisma
     end
 
     style PG fill:#336791,stroke:#fff,stroke-width:2px,color:#fff
     style API fill:#68a063,stroke:#fff,stroke-width:2px,color:#fff
-    style WS fill:#010101,stroke:#fff,stroke-width:2px,color:#fff
+    style Pusher fill:#300d4f,stroke:#fff,stroke-width:2px,color:#fff
     style ClientA fill:#61dafb,stroke:#fff,stroke-width:2px,color:#000
     style ClientB fill:#61dafb,stroke:#fff,stroke-width:2px,color:#000
 ```
@@ -85,7 +84,7 @@ graph TD
 ### Data Flow & Real-Time Sync Strategy
 1. **Optimistic UI Updates:** When a user drags a task, the frontend immediately updates the local state for zero perceived latency.
 2. **Persistent Storage:** A REST API call is made asynchronously to persist the new state to PostgreSQL.
-3. **Broadcasting:** Upon successful commit, the backend emits a targeted Socket.IO event to all *other* active users in that workspace, ensuring their clients re-render the exact same state instantly.
+3. **Broadcasting:** Upon successful commit, the backend emits a targeted **Pusher** event to all *other* active users in that workspace, ensuring their clients re-render the exact same state instantly. This architecture ensures high-performance real-time updates even on serverless platforms like Vercel.
 
 ---
 
@@ -98,7 +97,7 @@ graph TD
 | **Backend** | Node.js, Express.js | High-performance, unopinionated web server |
 | **Database** | PostgreSQL | ACID-compliant relational data storage |
 | **ORM** | Prisma | Type-safe database access and migration management |
-| **Real-time** | Socket.IO | Persistent WebSocket connections for live syncing |
+| **Real-time** | Pusher | Managed WebSockets for serverless/Vercel compatibility |
 | **Auth** | JWT, bcryptjs | Stateless, secure authentication & password hashing |
 | **Hosting** | Vercel, Railway | Edge-network frontend delivery and robust backend hosting |
 
@@ -127,6 +126,12 @@ Create a `.env` file in the `backend/` directory:
 PORT=8000
 DATABASE_URL="postgresql://user:password@localhost:5432/syncly?schema=public"
 JWT_SECRET="your_super_secret_key"
+
+# Pusher Credentials (Required for Vercel)
+PUSHER_APP_ID="your_app_id"
+PUSHER_KEY="your_key"
+PUSHER_SECRET="your_secret"
+PUSHER_CLUSTER="mt1"
 ```
 
 Initialize the database schema:
