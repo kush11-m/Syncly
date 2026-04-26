@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import Pusher from 'pusher';
+import dotenv from 'dotenv';
+
+dotenv.config();
 import { userRoutes } from './users/route.js';
 import { teamRoutes } from './teams/route.js';
 import { taskRoutes } from './tasks/route.js';
@@ -13,13 +16,28 @@ app.use(express.json());
 const PORT = process.env.PORT || 8000;
 
 // Initialize Pusher for real-time updates on Vercel
-export const pusher = new Pusher({
+const pusherInstance = new Pusher({
     appId: process.env.PUSHER_APP_ID,
     key: process.env.PUSHER_KEY,
     secret: process.env.PUSHER_SECRET,
     cluster: process.env.PUSHER_CLUSTER,
     useTLS: true
 });
+
+// Safe wrapper for Pusher triggers to prevent API crashes if Pusher is misconfigured or down
+export const pusher = {
+    trigger: async (channel, event, data) => {
+        try {
+            if (!process.env.PUSHER_APP_ID) {
+                console.warn(`Pusher skipped for event "${event}" (missing credentials)`);
+                return;
+            }
+            return await pusherInstance.trigger(channel, event, data);
+        } catch (error) {
+            console.error(`Pusher error on event "${event}":`, error.message);
+        }
+    }
+};
 
 
 app.get('/', (req, res) => res.send('Syncly API is running'));
