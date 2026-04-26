@@ -85,18 +85,11 @@ export const createTask = async (req, res) => {
             });
         }
 
-        // Still emit real-time task_created for board sync to all OTHER team members
-        const allMembers = await prisma.teamMember.findMany({
-            where: { teamId, status: 'Active', userId: { not: userId } }
+        // Emit real-time task_created for board sync to the entire team
+        await pusher.trigger(`team_${teamId}`, 'task_created', {
+            task: newTask,
+            teamId
         });
-        for (const member of allMembers) {
-            // Skip assignee since we already notified them above
-            if (normalizedAssigneeId && member.userId === normalizedAssigneeId) continue;
-            await pusher.trigger(`user_${member.userId}`, 'task_created', {
-                task: newTask,
-                teamId
-            });
-        }
 
         res.status(201).json({ message: "Task created", task: newTask });
     } catch (error) {
@@ -230,17 +223,11 @@ export const updateTask = async (req, res) => {
             });
         }
 
-        // Emit real-time task_updated for board sync to all OTHER team members
-        const allMembers = await prisma.teamMember.findMany({
-            where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
+        // Emit real-time task_updated for board sync to the entire team
+        await pusher.trigger(`team_${task.teamId}`, 'task_updated', {
+            task: updatedTask,
+            teamId: task.teamId
         });
-        for (const member of allMembers) {
-            if (member.userId === assignee) continue;
-            await pusher.trigger(`user_${member.userId}`, 'task_updated', {
-                task: updatedTask,
-                teamId: task.teamId
-            });
-        }
 
         res.status(200).json({ message: "Task updated", task: updatedTask });
     } catch (error) {
@@ -297,17 +284,11 @@ export const deleteTask = async (req, res) => {
             });
         }
 
-        // Emit real-time task_deleted for board sync to all OTHER team members
-        const allMembers = await prisma.teamMember.findMany({
-            where: { teamId: task.teamId, status: 'Active', userId: { not: userId } }
+        // Emit real-time task_deleted for board sync to the entire team
+        await pusher.trigger(`team_${task.teamId}`, 'task_deleted', {
+            taskId: task.id,
+            teamId: task.teamId
         });
-        for (const member of allMembers) {
-            if (member.userId === task.assigneeId) continue;
-            await pusher.trigger(`user_${member.userId}`, 'task_deleted', {
-                taskId: task.id,
-                teamId: task.teamId
-            });
-        }
 
         res.status(200).json({ message: "Task deleted" });
     } catch (error) {

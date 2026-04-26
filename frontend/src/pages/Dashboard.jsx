@@ -225,7 +225,8 @@ export default function Dashboard({ openSettings = false }) {
 
     pusherRef.current = pusher;
 
-    const channel = pusher.subscribe(`user_${user.id}`);
+    const userChannel = pusher.subscribe(`user_${user.id}`);
+    const teamChannel = activeTeamId ? pusher.subscribe(`team_${activeTeamId}`) : null;
     
     pusher.connection.bind('connected', () => {
       console.log('Pusher Connected');
@@ -236,121 +237,123 @@ export default function Dashboard({ openSettings = false }) {
       setIsConnected(false);
     });
 
-    // Listen for team updates
-    channel.bind('team_updated', ({ teamId }) => {
-      console.log('Team updated:', teamId);
-      if (activeTeamId && String(teamId) === activeTeamId) {
-        fetchTeamAndTasks();
-      }
-    });
-
-    // Listen for new notifications
-    channel.bind('new_notification', (notification) => {
+    // Listen for new notifications (User Channel)
+    userChannel.bind('new_notification', (notification) => {
       console.log('New notification:', notification);
       setUnreadCount(prev => prev + 1);
     });
 
-    // Listen for task created
-    channel.bind('task_created', ({ task, teamId }) => {
-      console.log('Task created:', task);
-      if (activeTeamId && String(teamId) === activeTeamId) {
-        const taskId = normalizeTaskId(task.id);
-
-        setTasks(prev => {
-          if (prev[taskId]) return prev;
-          return { ...prev, [taskId]: { ...task, content: task.title } };
-        });
-
-        const status = statusToColumnId(task.status);
-        setColumns(prev => {
-          const taskAlreadyInBoard = Object.values(prev).some(col => col.taskIds.includes(taskId));
-          if (taskAlreadyInBoard) return prev;
-
-          return {
-            ...prev,
-            [status]: {
-              ...prev[status],
-              taskIds: [...prev[status].taskIds, taskId]
-            }
-          };
-        });
-      }
-    });
-
-    // Listen for task updated
-    channel.bind('task_updated', ({ task, teamId }) => {
-      console.log('Task updated:', task);
-      if (activeTeamId && String(teamId) === activeTeamId) {
-        const taskId = normalizeTaskId(task.id);
-
-        if (pendingDragUpdates.current.has(taskId)) {
-          console.log('Skipping Pusher update for locally dragged task:', taskId);
-          return;
+    if (teamChannel) {
+      // Listen for team updates (Team Channel)
+      teamChannel.bind('team_updated', ({ teamId }) => {
+        console.log('Team updated:', teamId);
+        if (activeTeamId && String(teamId) === activeTeamId) {
+          fetchTeamAndTasks();
         }
+      });
 
-        const newStatus = statusToColumnId(task.status);
+      // Listen for task created (Team Channel)
+      teamChannel.bind('task_created', ({ task, teamId }) => {
+        console.log('Task created:', task);
+        if (activeTeamId && String(teamId) === activeTeamId) {
+          const taskId = normalizeTaskId(task.id);
 
-        setTasks(prev => {
-          const oldTask = prev[taskId];
-          if (!oldTask) return prev;
-          return { ...prev, [taskId]: { ...task, content: task.title } };
-        });
+          setTasks(prev => {
+            if (prev[taskId]) return prev;
+            return { ...prev, [taskId]: { ...task, content: task.title } };
+          });
 
-        setColumns(prevCols => {
-          let currentColumn = null;
-          for (const colId of Object.keys(prevCols)) {
-            if (prevCols[colId].taskIds.includes(taskId)) {
-              currentColumn = colId;
-              break;
-            }
+          const status = statusToColumnId(task.status);
+          setColumns(prev => {
+            const taskAlreadyInBoard = Object.values(prev).some(col => col.taskIds.includes(taskId));
+            if (taskAlreadyInBoard) return prev;
+
+            return {
+              ...prev,
+              [status]: {
+                ...prev[status],
+                taskIds: [...prev[status].taskIds, taskId]
+              }
+            };
+          });
+        }
+      });
+
+      // Listen for task updated (Team Channel)
+      teamChannel.bind('task_updated', ({ task, teamId }) => {
+        console.log('Task updated:', task);
+        if (activeTeamId && String(teamId) === activeTeamId) {
+          const taskId = normalizeTaskId(task.id);
+
+          if (pendingDragUpdates.current.has(taskId)) {
+            console.log('Skipping Pusher update for locally dragged task:', taskId);
+            return;
           }
 
-          if (currentColumn === newStatus) return prevCols;
+          const newStatus = statusToColumnId(task.status);
 
-          const cleanedColumns = {};
-          Object.keys(prevCols).forEach(colId => {
-            cleanedColumns[colId] = {
-              ...prevCols[colId],
-              taskIds: prevCols[colId].taskIds.filter(id => id !== taskId)
-            };
+          setTasks(prev => {
+            const oldTask = prev[taskId];
+            if (!oldTask) return prev;
+            return { ...prev, [taskId]: { ...task, content: task.title } };
           });
 
-          cleanedColumns[newStatus] = {
-            ...cleanedColumns[newStatus],
-            taskIds: [...cleanedColumns[newStatus].taskIds, taskId]
-          };
+          setColumns(prevCols => {
+            let currentColumn = null;
+            for (const colId of Object.keys(prevCols)) {
+              if (prevCols[colId].taskIds.includes(taskId)) {
+                currentColumn = colId;
+                break;
+              }
+            }
 
-          return cleanedColumns;
-        });
+            if (currentColumn === newStatus) return prevCols;
 
-        forceBoardRerender();
-      }
-    });
+            const cleanedColumns = {};
+            Object.keys(prevCols).forEach(colId => {
+              cleanedColumns[colId] = {
+                ...prevCols[colId],
+                taskIds: prevCols[colId].taskIds.filter(id => id !== taskId)
+              };
+            });
 
-    // Listen for task deleted
-    channel.bind('task_deleted', ({ taskId, teamId }) => {
-      console.log('Task deleted:', taskId);
-      if (activeTeamId && String(teamId) === activeTeamId) {
-        const normalizedTaskId = normalizeTaskId(taskId);
-
-        setTasks(prev => {
-          const newTasks = { ...prev };
-          delete newTasks[normalizedTaskId];
-          return newTasks;
-        });
-
-        setColumns(prev => {
-          const newColumns = { ...prev };
-          Object.keys(newColumns).forEach(colId => {
-            newColumns[colId] = {
-              ...newColumns[colId],
-              taskIds: newColumns[colId].taskIds.filter(id => id !== normalizedTaskId)
+            cleanedColumns[newStatus] = {
+              ...cleanedColumns[newStatus],
+              taskIds: [...cleanedColumns[newStatus].taskIds, taskId]
             };
+
+            return cleanedColumns;
           });
-          return newColumns;
-        });
-      }
-    });
+
+          forceBoardRerender();
+        }
+      });
+
+      // Listen for task deleted (Team Channel)
+      teamChannel.bind('task_deleted', ({ taskId, teamId }) => {
+        console.log('Task deleted:', taskId);
+        if (activeTeamId && String(teamId) === activeTeamId) {
+          const normalizedTaskId = normalizeTaskId(taskId);
+
+          setTasks(prev => {
+            const newTasks = { ...prev };
+            delete newTasks[normalizedTaskId];
+            return newTasks;
+          });
+
+          setColumns(prev => {
+            const newColumns = { ...prev };
+            Object.keys(newColumns).forEach(colId => {
+              newColumns[colId] = {
+                ...newColumns[colId],
+                taskIds: newColumns[colId].taskIds.filter(id => id !== normalizedTaskId)
+              };
+            });
+            return newColumns;
+          });
+        }
+      });
+    }
 
     setSocket(pusher);
 

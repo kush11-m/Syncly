@@ -109,13 +109,8 @@ export const joinTeam = async (req, res) => {
             });
         }
 
-        const activeMembers = await prisma.teamMember.findMany({
-            where: { teamId: normalizedTeamId, status: 'Active' }
-        });
-
-        for (const member of activeMembers) {
-            await pusher.trigger(`user_${member.userId}`, 'team_updated', { teamId: normalizedTeamId });
-        }
+        // Notify team of updates via team channel
+        await pusher.trigger(`team_${normalizedTeamId}`, 'team_updated', { teamId: normalizedTeamId });
 
         res.status(200).json({
             message: "Joined team successfully",
@@ -240,13 +235,8 @@ export const approveMember = async (req, res) => {
             });
         }
 
-        // Emit team update event to all team members including admin
-        const allMembers = await prisma.teamMember.findMany({
-            where: { teamId, status: 'Active' }
-        });
-        for (const m of allMembers) {
-            await pusher.trigger(`user_${m.userId}`, 'team_updated', { teamId });
-        }
+        // Emit team update event to the entire team
+        await pusher.trigger(`team_${teamId}`, 'team_updated', { teamId });
 
         res.status(200).json({ message: "Member approved" });
     } catch (error) {
@@ -365,13 +355,8 @@ export const updateMemberRole = async (req, res) => {
             data: { role: formatRole }
         });
 
-        // Emit team update event
-        const allMembers = await prisma.teamMember.findMany({
-            where: { teamId, status: 'Active' }
-        });
-        for (const m of allMembers) {
-            await pusher.trigger(`user_${m.userId}`, 'team_updated', { teamId });
-        }
+        // Emit team update event to the entire team
+        await pusher.trigger(`team_${teamId}`, 'team_updated', { teamId });
 
         res.status(200).json({ message: "Member role updated successfully", member: updatedMember });
     } catch (error) {
