@@ -245,10 +245,33 @@ export default function Dashboard({ openSettings = false }) {
 
     if (teamChannel) {
       // Listen for team updates (Team Channel)
-      teamChannel.bind('team_updated', ({ teamId }) => {
+      teamChannel.bind('team_updated', async ({ teamId }) => {
         console.log('Team updated:', teamId);
+        // Only refresh the team metadata (members/name) instead of refetching all tasks
         if (activeTeamId && String(teamId) === activeTeamId) {
-          fetchTeamAndTasks();
+          try {
+            const teamRes = await fetch(`${env.BACKEND_URL}/api/teams/${activeTeamId}`, {
+              headers: { 'Authorization': user?.token }
+            });
+
+            if (teamRes.ok) {
+              const teamData = await teamRes.json();
+              const transformedTeam = {
+                ...teamData.team,
+                members: teamData.team.members?.map(member => ({
+                  id: member.id,
+                  userId: member.user.id,
+                  name: member.user.name,
+                  email: member.user.email,
+                  role: member.role,
+                  status: member.status
+                })) || []
+              };
+              setTeam(transformedTeam);
+            }
+          } catch (e) {
+            console.error('Error fetching team after team_updated:', e);
+          }
         }
       });
 
@@ -430,7 +453,21 @@ export default function Dashboard({ openSettings = false }) {
       }
 
       if (res.ok) {
-        fetchTeamAndTasks();
+        // Avoid a full refetch to make UI feel instant. Use backend response to update board optimistically.
+        const data = await res.json();
+        const newTask = data.task;
+        const taskId = normalizeTaskId(newTask.id);
+
+        setTasks(prev => ({ ...prev, [taskId]: { ...newTask, content: newTask.title } }));
+
+        const status = statusToColumnId(newTask.status);
+        setColumns(prev => ({
+          ...prev,
+          [status]: {
+            ...prev[status],
+            taskIds: [...prev[status].taskIds, taskId]
+          }
+        }));
       }
     } catch (error) {
       console.error("Error creating task:", error);

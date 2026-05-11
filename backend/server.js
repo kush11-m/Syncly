@@ -15,20 +15,44 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8000;
 
+const getEnv = (...keys) => {
+    for (const key of keys) {
+        const value = process.env[key];
+        if (typeof value === 'string' && value.trim() !== '') {
+            return value.trim();
+        }
+    }
+    return undefined;
+};
+
+const pusherConfig = {
+    appId: getEnv('PUSHER_APP_ID', 'app_id'),
+    key: getEnv('PUSHER_KEY', 'key'),
+    secret: getEnv('PUSHER_SECRET', 'secret'),
+    cluster: getEnv('PUSHER_CLUSTER', 'cluster')
+};
+
 // Initialize Pusher for real-time updates on Vercel
 const pusherInstance = new Pusher({
-    appId: process.env.PUSHER_APP_ID,
-    key: process.env.PUSHER_KEY,
-    secret: process.env.PUSHER_SECRET,
-    cluster: process.env.PUSHER_CLUSTER,
+    appId: pusherConfig.appId,
+    key: pusherConfig.key,
+    secret: pusherConfig.secret,
+    cluster: pusherConfig.cluster,
     useTLS: true
 });
+
+const isPusherConfigured = Boolean(
+    pusherConfig.appId &&
+    pusherConfig.key &&
+    pusherConfig.secret &&
+    pusherConfig.cluster
+);
 
 // Safe wrapper for Pusher triggers to prevent API crashes if Pusher is misconfigured or down
 export const pusher = {
     trigger: async (channel, event, data) => {
         try {
-            if (!process.env.PUSHER_APP_ID) {
+            if (!isPusherConfigured) {
                 console.warn(`Pusher skipped for event "${event}" (missing credentials)`);
                 return;
             }
