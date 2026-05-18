@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 import { createPortal } from "react-dom";
 import { Trash2, MoreHorizontal, ArrowRight, ArrowLeft, CheckCircle } from "lucide-react";
@@ -20,14 +21,23 @@ const getPriorityColor = (priority) => {
 };
 
 export default function TaskCard({ task, index, onClick, onDelete, onAdvance, onRegress }) {
+    const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
     const status = task?.status;
     const isDone = status === 'done' || status === 'Done';
     const isTodo = status === 'todo' || status === 'To Do' || !status;
+    const description = (task?.description || "").trim();
+    const hasLongDescription = description.length > 100;
+    const previewDescription = hasLongDescription && !isDescriptionExpanded
+        ? `${description.slice(0, 100)}...`
+        : description;
 
-    const assigneeName =
-        typeof task?.assignee === 'string'
-            ? task.assignee
-            : task?.assignee?.name;
+    const assigneeNames = (() => {
+        if (Array.isArray(task?.assignees) && task.assignees.length) return task.assignees.map(a => a.name).filter(Boolean);
+        if (task?.assignee && typeof task.assignee === 'object' && task.assignee.name) return [task.assignee.name];
+        if (typeof task?.assignee === 'string') return [task.assignee];
+        if (Array.isArray(task?.assigneeIds) && task.assigneeIds.length && Array.isArray(task?.assigneeNames)) return task.assigneeNames;
+        return [];
+    })();
     
     return (
         <Draggable draggableId={String(task.id)} index={index}>
@@ -108,19 +118,37 @@ export default function TaskCard({ task, index, onClick, onDelete, onAdvance, on
                             {task.content}
                         </h4>
 
+                        {description ? (
+                            <div className="mb-3">
+                                <p className="text-xs text-zinc-400 leading-relaxed break-words">
+                                    {previewDescription}
+                                </p>
+                                {hasLongDescription ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setIsDescriptionExpanded((prev) => !prev);
+                                        }}
+                                        className="mt-1 text-[11px] text-orange-300 hover:text-orange-200 transition-colors"
+                                    >
+                                        {isDescriptionExpanded ? "Show less" : "Show more"}
+                                    </button>
+                                ) : null}
+                            </div>
+                        ) : null}
+
                         <div className="flex justify-between items-center mt-auto">
                             <span className="text-xs opacity-60 font-medium text-zinc-400">
                                 {task.dueDate ? new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
                             </span>
 
-                            {assigneeName && (
-                                <div
-                                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border shadow-sm bg-zinc-800 text-white border-zinc-700"
-                                    title={assigneeName}
-                                >
-                                    {getInitials(assigneeName)}
+                            {assigneeNames && assigneeNames.length > 0 ? (
+                                <div className="text-xs text-zinc-400 flex items-center gap-2">
+                                    <span className="font-medium text-zinc-300">Assigned to:</span>
+                                    <span className="truncate">{assigneeNames.join(', ')}</span>
                                 </div>
-                            )}
+                            ) : null}
                         </div>
                     </motion.div>
                 </div>

@@ -5,7 +5,7 @@ import Pusher from "pusher-js";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from "date-fns";
 import {
   Calendar as CalendarIcon, Kanban, Search, LogOut, Plus,
-  ChevronDown, Users, Bell, ChevronLeft, ChevronRight, Pencil, Trash2, Check
+  ChevronDown, Users, Bell, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../App";
@@ -120,6 +120,10 @@ export default function Dashboard({ openSettings = false }) {
   const [editingColumnName, setEditingColumnName] = useState("");
   const [columnNameError, setColumnNameError] = useState("");
   const [deleteConfirmColumnId, setDeleteConfirmColumnId] = useState(null);
+  const [deleteTaskId, setDeleteTaskId] = useState(null);
+  const [deleteTaskTitle, setDeleteTaskTitle] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   // Track pending drag updates to avoid processing Pusher events for local drags
   const pendingDragUpdates = useRef(new Set());
@@ -559,6 +563,40 @@ export default function Dashboard({ openSettings = false }) {
     return () => clearInterval(interval);
   }, [user]);
 
+  // Global keyboard shortcuts: Enter to confirm actions, Escape to cancel
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Enter') {
+        if (deleteTaskId) {
+          e.preventDefault();
+          confirmDeleteTask();
+          return;
+        }
+        if (editingColumnId) {
+          e.preventDefault();
+          handleSaveColumnName();
+          return;
+        }
+      }
+
+      if (e.key === 'Escape') {
+        if (deleteTaskId) {
+          e.preventDefault();
+          cancelDeleteTask();
+          return;
+        }
+        if (editingColumnId) {
+          e.preventDefault();
+          handleCancelEditColumn();
+          return;
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [deleteTaskId, editingColumnId]);
+
   const filteredTasks = useMemo(() => {
     if (!searchTerm) return tasks;
     const lowerTerm = searchTerm.toLowerCase();
@@ -572,7 +610,32 @@ export default function Dashboard({ openSettings = false }) {
 
   const handleCreateTask = async (taskData) => {
     try {
+      if (!team?.id) return false;
+      // Optimistic create: show immediately with a temporary id
       const statusTitle = columnIdToStatus(taskData.status);
+
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tempTask = {
+        id: tempId,
+        title: taskData.content,
+        content: taskData.content,
+        description: taskData.description || "",
+        teamId: team.id,
+        assigneeIds: taskData.assigneeIds ?? (taskData.assigneeId ? [taskData.assigneeId] : []),
+        priority: taskData.priority || "Medium",
+        dueDate: taskData.dueDate || null,
+        status: statusTitle
+      };
+
+      // Insert temp task into UI
+      setTasks(prev => ({ ...prev, [tempId]: tempTask }));
+      setColumns(prev => {
+        const statusCol = statusToColumnId(statusTitle, prev, columnOrder);
+        if (!prev[statusCol]) return prev;
+        return { ...prev, [statusCol]: { ...prev[statusCol], taskIds: [...prev[statusCol].taskIds, tempId] } };
+      });
+
+      // Call backend
       const res = await fetch(`${env.BACKEND_URL}/api/tasks`, {
         method: 'POST',
         headers: {
@@ -583,7 +646,8 @@ export default function Dashboard({ openSettings = false }) {
           title: taskData.content,
           description: taskData.description,
           teamId: team.id,
-          assigneeId: taskData.assigneeId ?? null,
+          assigneeIds: taskData.assigneeIds ?? undefined,
+          assigneeId: (!taskData.assigneeIds && taskData.assigneeId) ? taskData.assigneeId : undefined,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
           status: statusTitle
@@ -593,33 +657,71 @@ export default function Dashboard({ openSettings = false }) {
       if (res.status === 401) {
         logout();
         navigate('/auth/login', { replace: true });
-        return;
-      }
-
-      if (res.ok) {
-        // Avoid a full refetch to make UI feel instant. Use backend response to update board optimistically.
-        const data = await res.json();
-        const newTask = data.task;
-        const taskId = normalizeTaskId(newTask.id);
-
-        setTasks(prev => ({ ...prev, [taskId]: { ...newTask, content: newTask.title } }));
-
+        // remove temp
+        setTasks(prev => { const next = { ...prev }; delete next[tempId]; return next; });
         setColumns(prev => {
-          const status = statusToColumnId(newTask.status, prev, columnOrder);
-          if (!prev[status]) return prev;
-
-          return {
-            ...prev,
-            [status]: {
-              ...prev[status],
-              taskIds: [...prev[status].taskIds, taskId]
-            }
-          };
+          const next = { ...prev };
+          Object.keys(next).forEach(colId => {
+            next[colId] = { ...next[colId], taskIds: next[colId].taskIds.filter(id => id !== tempId) };
+          });
+          return next;
         });
+        return false;
       }
+
+      if (!res.ok) {
+        console.error("Error creating task: non-OK response", res.status);
+        // rollback temp
+        setTasks(prev => { const next = { ...prev }; delete next[tempId]; return next; });
+        setColumns(prev => {
+          const next = { ...prev };
+          Object.keys(next).forEach(colId => {
+            next[colId] = { ...next[colId], taskIds: next[colId].taskIds.filter(id => id !== tempId) };
+          });
+          return next;
+        });
+        return false;
+      }
+
+      const data = await res.json();
+      const newTask = data.task;
+      const realId = normalizeTaskId(newTask.id);
+
+      setTasks(prev => {
+        const next = { ...prev };
+        // remove temp if present
+        if (next[tempId]) delete next[tempId];
+        next[realId] = { ...newTask, content: newTask.title };
+        return next;
+      });
+
+      setColumns(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(colId => {
+          next[colId] = { ...next[colId], taskIds: next[colId].taskIds.map(id => id === tempId ? realId : id) };
+        });
+        return next;
+      });
+
+      return true;
     } catch (error) {
       console.error("Error creating task:", error);
+      return false;
     }
+  };
+
+  const handleQuickCreateTask = async (columnId, title) => {
+    const trimmedTitle = String(title || "").trim();
+    if (!trimmedTitle) return false;
+
+    return handleCreateTask({
+      content: trimmedTitle,
+      description: "",
+      status: columnId,
+      priority: "Medium",
+      assigneeId: null,
+      dueDate: null
+    });
   };
 
   const handleUpdateTask = async (taskData) => {
@@ -649,7 +751,8 @@ export default function Dashboard({ openSettings = false }) {
           priority: taskData.priority,
           dueDate: taskData.dueDate,
           status: backendStatus,
-          assigneeId: taskData.assigneeId ?? undefined
+          assigneeIds: taskData.assigneeIds ?? undefined,
+          assigneeId: (!taskData.assigneeIds && taskData.assigneeId) ? taskData.assigneeId : undefined
         })
       });
 
@@ -675,19 +778,45 @@ export default function Dashboard({ openSettings = false }) {
     }
   };
 
-  const handleDeleteTask = async (taskId) => {
-    if (!window.confirm("Are you sure you want to delete this task?")) return;
+  const handleDeleteTask = (taskId) => {
+    const normalizedId = normalizeTaskId(taskId);
+    const t = tasks[normalizedId];
+    setDeleteTaskId(normalizedId);
+    setDeleteTaskTitle(t?.title || t?.content || "");
+    setDeleteError("");
+  };
 
-    const normalizedTaskId = normalizeTaskId(taskId);
+  const confirmDeleteTask = async () => {
+    if (!deleteTaskId) return;
+    setDeleteLoading(true);
+    setDeleteError("");
 
+    // Optimistic delete: remove immediately but keep backups to restore on failure
+    const backupTask = tasks[deleteTaskId];
+    const backupColumns = { ...columns };
+
+    // Remove from UI immediately
     setTasks(prev => {
-      const newTasks = { ...prev };
-      delete newTasks[normalizedTaskId];
-      return newTasks;
+      const next = { ...prev };
+      delete next[deleteTaskId];
+      return next;
     });
 
+    setColumns(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(colId => {
+        next[colId] = { ...next[colId], taskIds: next[colId].taskIds.filter(id => id !== deleteTaskId) };
+      });
+      return next;
+    });
+
+    // close modal UI
+    const deletingId = deleteTaskId;
+    setDeleteTaskId(null);
+    setDeleteTaskTitle("");
+
     try {
-      const res = await fetch(`${env.BACKEND_URL}/api/tasks/${taskId}`, {
+      const res = await fetch(`${env.BACKEND_URL}/api/tasks/${deletingId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': user?.token
@@ -697,11 +826,42 @@ export default function Dashboard({ openSettings = false }) {
       if (res.status === 401) {
         logout();
         navigate('/auth/login', { replace: true });
+        // restore
+        setTasks(prev => ({ ...prev, [deleteTaskId]: backupTask }));
+        setColumns(backupColumns);
         return;
       }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // restore
+        setTasks(prev => ({ ...prev, [deleteTaskId]: backupTask }));
+        setColumns(backupColumns);
+        setDeleteError(data?.message || 'Failed to delete task');
+        // reopen modal for retry/inspect
+        setDeleteTaskId(deleteTaskId);
+        setDeleteTaskTitle(backupTask?.title || backupTask?.content || "");
+        return;
+      }
+
+      // success - nothing else to do as UI already removed
     } catch (error) {
-      console.error("Error deleting task:", error);
+      console.error('Error deleting task:', error);
+      // restore on network error
+      setTasks(prev => ({ ...prev, [deleteTaskId]: backupTask }));
+      setColumns(backupColumns);
+      setDeleteError('Network error while deleting');
+      setDeleteTaskId(deleteTaskId);
+      setDeleteTaskTitle(backupTask?.title || backupTask?.content || "");
+    } finally {
+      setDeleteLoading(false);
     }
+  };
+
+  const cancelDeleteTask = () => {
+    setDeleteTaskId(null);
+    setDeleteTaskTitle("");
+    setDeleteError("");
   };
 
   const moveTaskOptimistically = (task, newStatus) => {
@@ -1321,12 +1481,7 @@ export default function Dashboard({ openSettings = false }) {
                 onCreateColumn={handleCreateColumn}
                 onRenameColumn={handleRenameColumn}
                 onDeleteColumn={(colId) => setDeleteConfirmColumnId(colId)}
-                onAddTask={(colId) => {
-                  setTargetColumn(colId);
-                  setSelectedDate(null);
-                  setEditingTask(null);
-                  setIsTaskModalOpen(true);
-                }}
+                onQuickCreateTask={handleQuickCreateTask}
                 onAdvanceTask={handleAdvanceTask}
                 onRegressTask={handleRegressTask}
               />
@@ -1378,6 +1533,35 @@ export default function Dashboard({ openSettings = false }) {
         }))}
         teamMembers={(team?.members || []).filter((m) => m.status === 'Active')}
       />
+
+      {/* Delete Task Confirmation Modal */}
+      {deleteTaskId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl shadow-2xl p-6 transform transition-all scale-100 bg-black/40 backdrop-blur-xl border border-white/10">
+            <div className="mb-4">
+              <h3 className="text-lg font-bold text-zinc-100">Delete task</h3>
+              <p className="text-sm text-zinc-400 mt-2">Are you sure you want to delete <span className="font-semibold">{deleteTaskTitle}</span>? This action cannot be undone.</p>
+              {deleteError && <p className="text-xs text-red-300 mt-2">{deleteError}</p>}
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelDeleteTask}
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded-xl font-medium border hover:bg-white/5 transition-colors border-white/10 text-zinc-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteTask}
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded-xl font-bold shadow-lg shadow-red-500/10 hover:shadow-red-500/20 transition-all transform hover:-translate-y-0.5 bg-red-600 hover:bg-red-500 text-white"
+              >
+                {deleteLoading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <TeamModal
         isOpen={isTeamModalOpen}
@@ -1436,10 +1620,49 @@ function BoardView({
   onCreateColumn,
   onRenameColumn,
   onDeleteColumn,
-  onAddTask,
+  onQuickCreateTask,
   onAdvanceTask,
   onRegressTask
 }) {
+  const [newTaskColumnId, setNewTaskColumnId] = useState(null);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [isCreatingQuickTask, setIsCreatingQuickTask] = useState(false);
+
+  const openQuickAdd = (columnId) => {
+    setNewTaskColumnId(columnId);
+    setNewTaskTitle("");
+  };
+
+  const closeQuickAdd = () => {
+    setNewTaskColumnId(null);
+    setNewTaskTitle("");
+    setIsCreatingQuickTask(false);
+  };
+
+  const submitQuickAdd = async () => {
+    if (!newTaskColumnId || isCreatingQuickTask) return;
+    const trimmed = newTaskTitle.trim();
+    if (!trimmed) {
+      closeQuickAdd();
+      return;
+    }
+
+    const columnId = newTaskColumnId;
+    const title = trimmed;
+    setIsCreatingQuickTask(true);
+    closeQuickAdd();
+
+    try {
+      const created = await onQuickCreateTask(columnId, title);
+      if (!created) {
+        setNewTaskColumnId(columnId);
+        setNewTaskTitle(title);
+      }
+    } finally {
+      setIsCreatingQuickTask(false);
+    }
+  };
+
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <div className="flex h-full overflow-x-auto p-6 gap-6 scrollbar-hide relative">
@@ -1538,7 +1761,7 @@ function BoardView({
                         <Trash2 size={16} />
                       </button>
                       <button
-                        onClick={() => onAddTask(column.id)}
+                        onClick={() => openQuickAdd(column.id)}
                         className="p-1.5 rounded-lg hover:bg-orange-500/10 text-zinc-400 hover:text-orange-400 transition-colors"
                       >
                         <Plus size={18} />
@@ -1555,6 +1778,43 @@ function BoardView({
                     ref={provided.innerRef}
                     className={`flex-1 overflow-y-auto p-3 transition-colors ${snapshot.isDraggingOver ? "bg-orange-500/5" : ""}`}
                   >
+                    {newTaskColumnId === column.id ? (
+                      <div className="mb-3 rounded-xl border border-white/10 bg-white/5 p-2.5">
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={newTaskTitle}
+                            onChange={(e) => setNewTaskTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") submitQuickAdd();
+                              if (e.key === "Escape") closeQuickAdd();
+                            }}
+                            disabled={isCreatingQuickTask}
+                            className="flex-1 px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-orange-500/50"
+                            placeholder="Write task title..."
+                          />
+                          <button
+                            type="button"
+                            onClick={submitQuickAdd}
+                            disabled={isCreatingQuickTask}
+                            className="p-2 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
+                            title="Create Task"
+                          >
+                            <Check size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closeQuickAdd}
+                            disabled={isCreatingQuickTask}
+                            className="p-2 rounded-md bg-white/10 hover:bg-white/20 text-zinc-300 transition-colors"
+                            title="Cancel"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {colTasks.map((task, index) => (
                       <TaskCard
                         key={task.id}

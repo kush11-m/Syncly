@@ -19,7 +19,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
         description: "",
         status: "todo",
         priority: "Medium",
-        assigneeId: "",
+        assigneeIds: [],
         dueDate: "",
     });
 
@@ -40,8 +40,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     description: task.description || "",
                     status: internalStatus,
                     priority: task.priority || "Medium",
-                    assigneeId: (task.assigneeId ?? task.assignee?.id ?? "")?.toString?.() ?? "",
-                    dueDate: toDateInputValue(task.dueDate),
+                    assigneeIds: (task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []) ?? []).map((v) => String(v)),
+                    dueDate: toDateInputValue(task.dueDate ? task.dueDate : new Date()),
                 });
             } else {
                 setFormData({
@@ -49,7 +49,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     description: "",
                     status: initialStatus,
                     priority: "Medium",
-                    assigneeId: "",
+                    assigneeIds: [],
                     dueDate: toDateInputValue(initialDate || new Date()),
                 });
             }
@@ -63,7 +63,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
         onSave({
             ...formData,
             id: task?.id,
-            assigneeId: formData.assigneeId ? Number(formData.assigneeId) : null
+            assigneeIds: Array.isArray(formData.assigneeIds) ? formData.assigneeIds.map(v => Number(v)) : (formData.assigneeIds ? [Number(formData.assigneeIds)] : [])
         });
         onClose();
     };
@@ -120,20 +120,6 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Status</label>
-                            <select
-                                value={formData.status}
-                                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors appearance-none"
-                            >
-                                {statusOptions.map((option) => (
-                                    <option key={option.id} value={option.id} className="bg-zinc-900 text-zinc-100">
-                                        {option.title}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
                             <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Due Date</label>
                             <input
                                 type="date"
@@ -146,10 +132,14 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Assignee</label>
+                        <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Assignees</label>
                         <select
-                            value={formData.assigneeId}
-                            onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })}
+                            multiple
+                            value={formData.assigneeIds}
+                            onChange={(e) => {
+                                const values = Array.from(e.target.selectedOptions).map(o => o.value);
+                                setFormData({ ...formData, assigneeIds: values });
+                            }}
                             className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors appearance-none"
                         >
                             <option value="" className="bg-zinc-900 text-zinc-100">Unassigned</option>
