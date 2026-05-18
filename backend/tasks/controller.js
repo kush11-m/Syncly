@@ -3,7 +3,7 @@ import { createNotification } from '../notifications/controller.js';
 import { pusher } from '../server.js';
 
 export const createTask = async (req, res) => {
-    const { title, description, teamId, assigneeId, priority, dueDate } = req.body;
+    const { title, description, teamId, assigneeId, priority, dueDate, status } = req.body;
     const userId = req.user.userId;
 
     try {
@@ -51,6 +51,7 @@ export const createTask = async (req, res) => {
             data: {
                 title,
                 description,
+                status: status || 'To Do',
                 teamId,
                 assigneeId: normalizedAssigneeId,
                 priority: priority || 'Medium',

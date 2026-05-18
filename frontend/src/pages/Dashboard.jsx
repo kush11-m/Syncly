@@ -5,7 +5,7 @@ import Pusher from "pusher-js";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from "date-fns";
 import {
   Calendar as CalendarIcon, Kanban, Search, LogOut, Plus,
-  ChevronDown, Users, Bell, ChevronLeft, ChevronRight
+  ChevronDown, Users, Bell, ChevronLeft, ChevronRight, Pencil, Trash2, Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../App";
@@ -19,6 +19,69 @@ import NotificationPanel from "../components/NotificationPanel";
 import { getTeamPath, getTeamSlug } from "../utils/teamUrl";
 
 import { env } from "../config";
+
+const DEFAULT_COLUMNS = [
+  { id: "todo", title: "To Do" },
+  { id: "inprogress", title: "In Progress" },
+  { id: "done", title: "Done" },
+];
+
+const toColumnId = (value) => {
+  const base = String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return base || `column-${Date.now()}`;
+};
+
+const createDefaultColumnsState = () => {
+  const next = {};
+  DEFAULT_COLUMNS.forEach((column) => {
+    next[column.id] = { ...column, taskIds: [] };
+  });
+  return next;
+};
+
+const createUniqueColumn = (title, existingColumns) => {
+  const cleanedTitle = String(title || "").trim();
+  const safeTitle = cleanedTitle || "Untitled";
+  const existingIds = new Set(Object.keys(existingColumns || {}));
+  const existingTitles = new Set(
+    Object.values(existingColumns || {}).map((column) => column.title.toLowerCase())
+  );
+
+  if (existingTitles.has(safeTitle.toLowerCase())) return null;
+
+  const baseId = toColumnId(safeTitle);
+  let id = baseId;
+  let idx = 1;
+  while (existingIds.has(id)) {
+    id = `${baseId}-${idx}`;
+    idx += 1;
+  }
+
+  return { id, title: safeTitle, taskIds: [] };
+};
+
+const findColumnIdByStatus = (status, currentColumns, currentOrder) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (!normalizedStatus) return currentOrder?.[0] || DEFAULT_COLUMNS[0].id;
+
+  const byTitle = currentOrder?.find((columnId) => {
+    const column = currentColumns[columnId];
+    return column?.title?.toLowerCase() === normalizedStatus;
+  });
+  if (byTitle) return byTitle;
+
+  const byId = currentOrder?.find((columnId) => columnId.toLowerCase() === normalizedStatus);
+  if (byId) return byId;
+
+  return currentOrder?.[0] || DEFAULT_COLUMNS[0].id;
+};
 
 export default function Dashboard({ openSettings = false }) {
   const { teamSlug } = useParams();
@@ -38,12 +101,8 @@ export default function Dashboard({ openSettings = false }) {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const [tasks, setTasks] = useState({});
-  const [columns, setColumns] = useState({
-    todo: { id: "todo", title: "To Do", taskIds: [] },
-    inprogress: { id: "inprogress", title: "In Progress", taskIds: [] },
-    done: { id: "done", title: "Done", taskIds: [] },
-  });
-  const [columnOrder, setColumnOrder] = useState(["todo", "inprogress", "done"]);
+  const [columns, setColumns] = useState(createDefaultColumnsState());
+  const [columnOrder, setColumnOrder] = useState(DEFAULT_COLUMNS.map((column) => column.id));
   const [team, setTeam] = useState(null);
   const [myTeams, setMyTeams] = useState([]);
 
@@ -57,24 +116,23 @@ export default function Dashboard({ openSettings = false }) {
   const [targetColumn, setTargetColumn] = useState("todo");
   const [unreadCount, setUnreadCount] = useState(0);
   const [boardRenderVersion, setBoardRenderVersion] = useState(0);
+  const [editingColumnId, setEditingColumnId] = useState(null);
+  const [editingColumnName, setEditingColumnName] = useState("");
+  const [columnNameError, setColumnNameError] = useState("");
+  const [deleteConfirmColumnId, setDeleteConfirmColumnId] = useState(null);
 
   // Track pending drag updates to avoid processing Pusher events for local drags
   const pendingDragUpdates = useRef(new Set());
 
   const normalizeTaskId = (taskId) => String(taskId);
 
-  const statusToColumnId = (status) => {
-    if (status === 'To Do') return 'todo';
-    if (status === 'In Progress') return 'inprogress';
-    if (status === 'Done') return 'done';
-    return 'todo';
-  };
+  const statusToColumnId = (status, sourceColumns = columns, sourceOrder = columnOrder) =>
+    findColumnIdByStatus(status, sourceColumns, sourceOrder);
 
-  const columnIdToStatus = (columnId) => {
-    if (columnId === 'todo') return 'To Do';
-    if (columnId === 'inprogress') return 'In Progress';
-    if (columnId === 'done') return 'Done';
-    return 'To Do';
+  const columnIdToStatus = (columnId, sourceColumns = columns, sourceOrder = columnOrder) => {
+    if (sourceColumns[columnId]?.title) return sourceColumns[columnId].title;
+    const fallbackId = sourceOrder?.[0] || DEFAULT_COLUMNS[0].id;
+    return sourceColumns[fallbackId]?.title || "To Do";
   };
 
   const forceBoardRerender = () => {
@@ -84,6 +142,54 @@ export default function Dashboard({ openSettings = false }) {
   useEffect(() => {
     if (openSettings) setIsTeamModalOpen(true);
   }, [openSettings]);
+
+  const getColumnsStorageKey = (teamId) => `syncly_columns_${teamId}`;
+
+  const loadSavedBoardColumns = (teamId) => {
+    if (!teamId) return null;
+    try {
+      const raw = localStorage.getItem(getColumnsStorageKey(teamId));
+      if (!raw) return null;
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+
+      const parsedColumns = parsed.columns || {};
+      const parsedOrder = Array.isArray(parsed.columnOrder) ? parsed.columnOrder : [];
+
+      const cleanedColumns = {};
+      parsedOrder.forEach((columnId) => {
+        const column = parsedColumns[columnId];
+        if (!column?.id || !column?.title) return;
+        cleanedColumns[column.id] = { id: column.id, title: column.title, taskIds: [] };
+      });
+
+      if (!Object.keys(cleanedColumns).length) return null;
+      return { columns: cleanedColumns, columnOrder: Object.keys(cleanedColumns) };
+    } catch (error) {
+      console.error("Failed to load board columns:", error);
+      return null;
+    }
+  };
+
+  const saveBoardColumns = (teamId, nextColumns, nextOrder) => {
+    if (!teamId) return;
+    try {
+      const minimalColumns = {};
+      nextOrder.forEach((columnId) => {
+        const column = nextColumns[columnId];
+        if (!column) return;
+        minimalColumns[columnId] = { id: column.id, title: column.title };
+      });
+
+      localStorage.setItem(
+        getColumnsStorageKey(teamId),
+        JSON.stringify({ columns: minimalColumns, columnOrder: nextOrder })
+      );
+    } catch (error) {
+      console.error("Failed to save board columns:", error);
+    }
+  };
 
   const fetchTeamAndTasks = async () => {
     setLoading(true);
@@ -171,23 +277,35 @@ export default function Dashboard({ openSettings = false }) {
       if (tasksRes.ok) {
         const tasksData = await tasksRes.json();
         const newTasks = {};
-        const newColumns = {
-          todo: { id: "todo", title: "To Do", taskIds: [] },
-          inprogress: { id: "inprogress", title: "In Progress", taskIds: [] },
-          done: { id: "done", title: "Done", taskIds: [] },
-        };
+        const storedBoard = loadSavedBoardColumns(activeTeamId);
+        const newColumns = storedBoard?.columns || createDefaultColumnsState();
+        const nextOrder = storedBoard?.columnOrder || DEFAULT_COLUMNS.map((column) => column.id);
 
         tasksData.tasks.forEach(task => {
           const taskId = normalizeTaskId(task.id);
           newTasks[taskId] = { ...task, content: task.title };
-          const status = statusToColumnId(task.status);
-          if (newColumns[status]) {
-            newColumns[status].taskIds.push(taskId);
+
+          let statusColumnId = statusToColumnId(task.status, newColumns, nextOrder);
+          const statusExists = nextOrder.some((columnId) => newColumns[columnId]?.title?.toLowerCase() === String(task.status || "").trim().toLowerCase());
+
+          if (!statusExists && String(task.status || "").trim()) {
+            const dynamicColumn = createUniqueColumn(task.status, newColumns);
+            if (dynamicColumn) {
+              newColumns[dynamicColumn.id] = dynamicColumn;
+              nextOrder.push(dynamicColumn.id);
+              statusColumnId = dynamicColumn.id;
+            }
+          }
+
+          if (newColumns[statusColumnId]) {
+            newColumns[statusColumnId].taskIds.push(taskId);
           }
         });
 
         setTasks(newTasks);
         setColumns(newColumns);
+        setColumnOrder(nextOrder);
+        saveBoardColumns(activeTeamId, newColumns, nextOrder);
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -199,6 +317,11 @@ export default function Dashboard({ openSettings = false }) {
   useEffect(() => {
     fetchTeamAndTasks();
   }, [teamSlug, user]);
+
+  useEffect(() => {
+    if (!team?.id) return;
+    saveBoardColumns(team.id, columns, columnOrder);
+  }, [team?.id, columns, columnOrder]);
 
   const pusherRef = useRef(null);
 
@@ -291,6 +414,19 @@ export default function Dashboard({ openSettings = false }) {
             const taskAlreadyInBoard = Object.values(prev).some(col => col.taskIds.includes(taskId));
             if (taskAlreadyInBoard) return prev;
 
+            if (!prev[status]) {
+              const dynamicColumn = createUniqueColumn(task.status, prev);
+              if (!dynamicColumn) return prev;
+              setColumnOrder((prevOrder) => [...prevOrder, dynamicColumn.id]);
+              return {
+                ...prev,
+                [dynamicColumn.id]: {
+                  ...dynamicColumn,
+                  taskIds: [taskId]
+                }
+              };
+            }
+
             return {
               ...prev,
               [status]: {
@@ -339,6 +475,14 @@ export default function Dashboard({ openSettings = false }) {
                 taskIds: prevCols[colId].taskIds.filter(id => id !== taskId)
               };
             });
+
+            if (!cleanedColumns[newStatus]) {
+              const dynamicColumn = createUniqueColumn(task.status, cleanedColumns);
+              if (dynamicColumn) {
+                cleanedColumns[dynamicColumn.id] = dynamicColumn;
+                setColumnOrder((prevOrder) => [...prevOrder, dynamicColumn.id]);
+              }
+            }
 
             cleanedColumns[newStatus] = {
               ...cleanedColumns[newStatus],
@@ -428,6 +572,7 @@ export default function Dashboard({ openSettings = false }) {
 
   const handleCreateTask = async (taskData) => {
     try {
+      const statusTitle = columnIdToStatus(taskData.status);
       const res = await fetch(`${env.BACKEND_URL}/api/tasks`, {
         method: 'POST',
         headers: {
@@ -441,8 +586,7 @@ export default function Dashboard({ openSettings = false }) {
           assigneeId: taskData.assigneeId ?? null,
           priority: taskData.priority,
           dueDate: taskData.dueDate,
-          status: taskData.status === 'todo' ? 'To Do' :
-            taskData.status === 'inprogress' ? 'In Progress' : 'Done'
+          status: statusTitle
         })
       });
 
@@ -460,14 +604,18 @@ export default function Dashboard({ openSettings = false }) {
 
         setTasks(prev => ({ ...prev, [taskId]: { ...newTask, content: newTask.title } }));
 
-        const status = statusToColumnId(newTask.status);
-        setColumns(prev => ({
-          ...prev,
-          [status]: {
-            ...prev[status],
-            taskIds: [...prev[status].taskIds, taskId]
-          }
-        }));
+        setColumns(prev => {
+          const status = statusToColumnId(newTask.status, prev, columnOrder);
+          if (!prev[status]) return prev;
+
+          return {
+            ...prev,
+            [status]: {
+              ...prev[status],
+              taskIds: [...prev[status].taskIds, taskId]
+            }
+          };
+        });
       }
     } catch (error) {
       console.error("Error creating task:", error);
@@ -477,10 +625,7 @@ export default function Dashboard({ openSettings = false }) {
   const handleUpdateTask = async (taskData) => {
     const normalizedTaskId = normalizeTaskId(taskData.id);
 
-    // Convert internal status to backend format for consistency
-    const backendStatus = taskData.status === 'todo' ? 'To Do' :
-      taskData.status === 'inprogress' ? 'In Progress' :
-        taskData.status === 'done' ? 'Done' : taskData.status;
+    const backendStatus = columnIdToStatus(taskData.status);
 
     // Update with backend format for consistency with Socket.IO events
     const updatedTaskData = {
@@ -616,31 +761,197 @@ export default function Dashboard({ openSettings = false }) {
     // Task status is 'To Do', 'In Progress', 'Done'.
     // We need a helper or just consistent mapping.
 
-    const statusMap = { 'To Do': 'todo', 'In Progress': 'inprogress', 'Done': 'done' };
-    const reverseMap = { 'todo': 'To Do', 'inprogress': 'In Progress', 'done': 'Done' };
-
-    const internalStatus = statusMap[currentStatus] || 'todo';
+    const internalStatus = statusToColumnId(currentStatus);
     const currentIndex = columnOrder.indexOf(internalStatus);
 
     if (currentIndex < columnOrder.length - 1) {
       const nextInternalStatus = columnOrder[currentIndex + 1];
-      const nextStatus = reverseMap[nextInternalStatus];
+      const nextStatus = columnIdToStatus(nextInternalStatus);
       moveTaskOptimistically(task, nextStatus);
     }
   };
 
   const handleRegressTask = (task) => {
-    const statusMap = { 'To Do': 'todo', 'In Progress': 'inprogress', 'Done': 'done' };
-    const reverseMap = { 'todo': 'To Do', 'inprogress': 'In Progress', 'done': 'Done' };
-
-    const internalStatus = statusMap[task.status] || 'todo';
+    const internalStatus = statusToColumnId(task.status);
     const currentIndex = columnOrder.indexOf(internalStatus);
 
     if (currentIndex > 0) {
       const prevInternalStatus = columnOrder[currentIndex - 1];
-      const prevStatus = reverseMap[prevInternalStatus];
+      const prevStatus = columnIdToStatus(prevInternalStatus);
       moveTaskOptimistically(task, prevStatus);
     }
+  };
+
+  const updateTaskStatuses = async (taskIds, nextStatusTitle) => {
+    if (!taskIds.length) return;
+
+    await Promise.all(
+      taskIds.map((taskId) => {
+        const task = tasks[taskId];
+        if (!task) return Promise.resolve();
+
+        return fetch(`${env.BACKEND_URL}/api/tasks/${task.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": user?.token
+          },
+          body: JSON.stringify({ status: nextStatusTitle })
+        }).catch((error) => {
+          console.error("Error updating task status after column change:", error);
+        });
+      })
+    );
+  };
+
+  const handleCreateColumn = () => {
+    setColumnNameError("");
+    setColumns((prev) => {
+      let newName = "Untitled";
+      let counter = 1;
+      const existingTitles = Object.values(prev).map((col) => col.title.toLowerCase());
+
+      while (existingTitles.includes(newName.toLowerCase())) {
+        newName = `Untitled ${counter}`;
+        counter += 1;
+      }
+
+      const newColumn = createUniqueColumn(newName, prev);
+      if (!newColumn) return prev;
+
+      setColumnOrder((prevOrder) => [...prevOrder, newColumn.id]);
+      setEditingColumnId(newColumn.id);
+      setEditingColumnName(newName);
+      return { ...prev, [newColumn.id]: newColumn };
+    });
+  };
+
+  const handleSaveColumnName = async () => {
+    if (!editingColumnId) return;
+
+    const currentColumn = columns[editingColumnId];
+    if (!currentColumn) {
+      setEditingColumnId(null);
+      setEditingColumnName("");
+      setColumnNameError("");
+      return;
+    }
+
+    const trimmedName = editingColumnName.trim();
+    if (!trimmedName) {
+      setEditingColumnName(currentColumn.title);
+      setColumnNameError("");
+      return;
+    }
+
+    if (trimmedName === currentColumn.title) {
+      setEditingColumnId(null);
+      setEditingColumnName("");
+      setColumnNameError("");
+      return;
+    }
+
+    const nameTaken = columnOrder.some(
+      (id) => id !== editingColumnId && columns[id]?.title?.toLowerCase() === trimmedName.toLowerCase()
+    );
+
+    if (nameTaken) {
+      setColumnNameError("Column name already exists.");
+      return;
+    }
+
+    setColumnNameError("");
+
+    const taskIdsToUpdate = [...(currentColumn.taskIds || [])];
+
+    setColumns((prev) => ({
+      ...prev,
+      [editingColumnId]: {
+        ...prev[editingColumnId],
+        title: trimmedName
+      }
+    }));
+
+    setTasks((prev) => {
+      const next = { ...prev };
+      taskIdsToUpdate.forEach((taskId) => {
+        if (!next[taskId]) return;
+        next[taskId] = { ...next[taskId], status: trimmedName };
+      });
+      return next;
+    });
+
+    await updateTaskStatuses(taskIdsToUpdate, trimmedName);
+    setEditingColumnId(null);
+    setEditingColumnName("");
+    setColumnNameError("");
+  };
+
+  const handleEditingColumnNameChange = (value) => {
+    setEditingColumnName(value);
+    if (columnNameError) setColumnNameError("");
+  };
+
+  const handleCancelEditColumn = () => {
+    setEditingColumnId(null);
+    setEditingColumnName("");
+    setColumnNameError("");
+  };
+
+  const handleRenameColumn = (columnId) => {
+    const currentColumn = columns[columnId];
+    if (!currentColumn) return;
+
+    setEditingColumnId(columnId);
+    setEditingColumnName(currentColumn.title);
+    setColumnNameError("");
+  };
+
+  const handleDeleteColumn = (columnId) => {
+    if (columnOrder.length <= 1) {
+      return;
+    }
+    setDeleteConfirmColumnId(columnId);
+  };
+
+  const handleConfirmDeleteColumn = async (columnId) => {
+    const columnToDelete = columns[columnId];
+    if (!columnToDelete) return;
+
+    const fallbackColumnId = columnOrder.find((id) => id !== columnId);
+    if (!fallbackColumnId || !columns[fallbackColumnId]) return;
+
+    const movedTaskIds = [...(columnToDelete.taskIds || [])];
+
+    setColumns((prev) => {
+      const next = { ...prev };
+      const destinationIds = [...next[fallbackColumnId].taskIds, ...movedTaskIds];
+      next[fallbackColumnId] = {
+        ...next[fallbackColumnId],
+        taskIds: [...new Set(destinationIds)]
+      };
+      delete next[columnId];
+      return next;
+    });
+
+    setColumnOrder((prev) => prev.filter((id) => id !== columnId));
+
+    const fallbackStatus = columns[fallbackColumnId].title;
+    setTasks((prev) => {
+      const next = { ...prev };
+      movedTaskIds.forEach((taskId) => {
+        if (!next[taskId]) return;
+        next[taskId] = { ...next[taskId], status: fallbackStatus };
+      });
+      return next;
+    });
+
+    await updateTaskStatuses(movedTaskIds, fallbackStatus);
+    setDeleteConfirmColumnId(null);
+  };
+
+  const handleCancelDeleteColumn = () => {
+    setDeleteConfirmColumnId(null);
   };
 
   const handleRenameTeam = (newName) => {
@@ -995,9 +1306,21 @@ export default function Dashboard({ openSettings = false }) {
                 tasks={filteredTasks}
                 columns={columns}
                 columnOrder={columnOrder}
+                editingColumnId={editingColumnId}
+                editingColumnName={editingColumnName}
+                columnNameError={columnNameError}
+                onEditingColumnNameChange={handleEditingColumnNameChange}
+                onSaveColumnName={handleSaveColumnName}
+                onCancelEditColumn={handleCancelEditColumn}
+                deleteConfirmColumnId={deleteConfirmColumnId}
+                onConfirmDeleteColumn={() => handleConfirmDeleteColumn(deleteConfirmColumnId)}
+                onCancelDeleteColumn={handleCancelDeleteColumn}
                 onDragEnd={onDragEnd}
                 onEditTask={(task) => { setEditingTask(task); setIsTaskModalOpen(true); }}
                 onDeleteTask={handleDeleteTask}
+                onCreateColumn={handleCreateColumn}
+                onRenameColumn={handleRenameColumn}
+                onDeleteColumn={(colId) => setDeleteConfirmColumnId(colId)}
                 onAddTask={(colId) => {
                   setTargetColumn(colId);
                   setSelectedDate(null);
@@ -1049,6 +1372,10 @@ export default function Dashboard({ openSettings = false }) {
         task={editingTask}
         initialDate={selectedDate}
         initialStatus={targetColumn}
+        statusOptions={columnOrder.map((columnId) => ({
+          id: columnId,
+          title: columns[columnId]?.title || columnId
+        }))}
         teamMembers={(team?.members || []).filter((m) => m.status === 'Active')}
       />
 
@@ -1090,7 +1417,29 @@ export default function Dashboard({ openSettings = false }) {
   );
 }
 
-function BoardView({ tasks, columns, columnOrder, onDragEnd, onEditTask, onDeleteTask, onAddTask, onAdvanceTask, onRegressTask }) {
+function BoardView({
+  tasks,
+  columns,
+  columnOrder,
+  editingColumnId,
+  editingColumnName,
+  columnNameError,
+  onEditingColumnNameChange,
+  onSaveColumnName,
+  onCancelEditColumn,
+  deleteConfirmColumnId,
+  onConfirmDeleteColumn,
+  onCancelDeleteColumn,
+  onDragEnd,
+  onEditTask,
+  onDeleteTask,
+  onCreateColumn,
+  onRenameColumn,
+  onDeleteColumn,
+  onAddTask,
+  onAdvanceTask,
+  onRegressTask
+}) {
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <div className="flex h-full overflow-x-auto p-6 gap-6 scrollbar-hide relative">
@@ -1115,18 +1464,88 @@ function BoardView({ tasks, columns, columnOrder, onDragEnd, onEditTask, onDelet
           return (
             <div key={column.id} className="flex flex-col w-80 min-w-[20rem] h-full max-h-full rounded-2xl shadow-xl border border-white/5 bg-black/50 backdrop-blur-xl relative z-0">
               <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5 rounded-t-2xl">
-                <h3 className="font-bold text-lg text-zinc-100 tracking-wide">{column.title}</h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-black/40 text-zinc-400 border border-white/5">
-                    {colTasks.length}
-                  </span>
-                  <button
-                    onClick={() => onAddTask(column.id)}
-                    className="p-1.5 rounded-lg hover:bg-orange-500/10 text-zinc-400 hover:text-orange-400 transition-colors"
-                  >
-                    <Plus size={18} />
-                  </button>
-                </div>
+                {editingColumnId === column.id ? (
+                  <div className="w-full flex flex-col gap-1">
+                    {columnNameError ? (
+                      <p className="text-[11px] text-red-300 font-medium">{columnNameError}</p>
+                    ) : null}
+                    <div className="flex items-center gap-2 w-full">
+                      <input
+                        autoFocus
+                        value={editingColumnName}
+                        onChange={(e) => onEditingColumnNameChange(e.target.value)}
+                        onBlur={onSaveColumnName}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") onSaveColumnName();
+                          if (e.key === "Escape") onCancelEditColumn();
+                        }}
+                        className="flex-1 px-2 py-1 rounded-md bg-white/10 border border-orange-500/50 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-orange-500 text-lg font-bold"
+                      />
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={onSaveColumnName}
+                        className="p-2 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
+                        title="Save Column Name"
+                      >
+                        <Check size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : deleteConfirmColumnId === column.id ? (
+                  <div className="flex-1 flex flex-col gap-2">
+                    <p className="text-sm font-medium text-zinc-300">Delete "{column.title}"?</p>
+                    <p className="text-xs text-zinc-500">Tasks will move to {columns[columnOrder.find((id) => id !== column.id)]?.title || "another column"}.</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={onConfirmDeleteColumn}
+                        className="px-2 py-1 text-xs rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-300 font-medium transition-colors"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={onCancelDeleteColumn}
+                        className="px-2 py-1 text-xs rounded-md bg-white/10 hover:bg-white/20 text-zinc-300 font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="font-bold text-lg text-zinc-100 tracking-wide">{column.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-black/40 text-zinc-400 border border-white/5">
+                        {
+                          (() => {
+                            const uniqueTaskIds = [...new Set(column.taskIds.map((taskId) => String(taskId)))];
+                            return uniqueTaskIds.filter((taskId) => tasks[taskId]).length;
+                          })()
+                        }
+                      </span>
+                      <button
+                        onClick={() => onRenameColumn(column.id)}
+                        className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-zinc-200 transition-colors"
+                        title="Rename Column"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={() => onDeleteColumn(column.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-colors"
+                        title="Delete Column"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => onAddTask(column.id)}
+                        className="p-1.5 rounded-lg hover:bg-orange-500/10 text-zinc-400 hover:text-orange-400 transition-colors"
+                      >
+                        <Plus size={18} />
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
               <Droppable droppableId={column.id}>
@@ -1154,6 +1573,17 @@ function BoardView({ tasks, columns, columnOrder, onDragEnd, onEditTask, onDelet
             </div>
           );
         })}
+
+        <button
+          onClick={onCreateColumn}
+          className="w-80 min-w-[20rem] h-fit rounded-2xl border border-dashed border-white/15 bg-black/20 hover:bg-black/30 hover:border-orange-500/40 text-zinc-300 hover:text-orange-300 transition-colors p-5 text-left"
+        >
+          <div className="flex items-center gap-3 font-semibold">
+            <Plus size={18} />
+            Add Column
+          </div>
+          <p className="text-xs text-zinc-500 mt-2">Create a new stage for your workflow.</p>
+        </button>
       </div>
     </DragDropContext>
   );

@@ -13,7 +13,7 @@ const toDateInputValue = (value) => {
     return parsed.toISOString().slice(0, 10);
 };
 
-export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, initialStatus = "todo", teamMembers = [] }) {
+export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, initialStatus = "todo", statusOptions = [], teamMembers = [] }) {
     const [formData, setFormData] = useState({
         content: "",
         description: "",
@@ -26,13 +26,14 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
     useEffect(() => {
         if (isOpen) {
             if (task) {
-                // Map backend status format to internal format
-                const statusMap = {
-                    'To Do': 'todo',
-                    'In Progress': 'inprogress',
-                    'Done': 'done'
-                };
-                const internalStatus = statusMap[task.status] || task.status || 'todo';
+                const normalizedTaskStatus = String(task.status || "").trim().toLowerCase();
+                const matchedStatusOption = statusOptions.find((option) => {
+                    if (!option) return false;
+                    const optionId = String(option.id || "").trim().toLowerCase();
+                    const optionTitle = String(option.title || "").trim().toLowerCase();
+                    return optionId === normalizedTaskStatus || optionTitle === normalizedTaskStatus;
+                });
+                const internalStatus = matchedStatusOption?.id || task.status || initialStatus;
 
                 setFormData({
                     content: task.content || "",
@@ -53,7 +54,7 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                 });
             }
         }
-    }, [isOpen, task, initialDate, initialStatus]);
+    }, [isOpen, task, initialDate, initialStatus, statusOptions]);
 
     if (!isOpen) return null;
 
@@ -125,9 +126,11 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                                 className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors appearance-none"
                             >
-                                <option value="todo" className="bg-zinc-900 text-zinc-100">To Do</option>
-                                <option value="inprogress" className="bg-zinc-900 text-zinc-100">In Progress</option>
-                                <option value="done" className="bg-zinc-900 text-zinc-100">Done</option>
+                                {statusOptions.map((option) => (
+                                    <option key={option.id} value={option.id} className="bg-zinc-900 text-zinc-100">
+                                        {option.title}
+                                    </option>
+                                ))}
                             </select>
                         </div>
                         <div>
