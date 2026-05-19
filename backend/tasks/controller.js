@@ -3,7 +3,7 @@ import { createNotification } from '../notifications/controller.js';
 import { pusher } from '../server.js';
 
 export const createTask = async (req, res) => {
-    const { title, description, teamId, assigneeId, priority, dueDate, status } = req.body;
+    const { title, description, teamId, assigneeId, assigneeIds, priority, dueDate, status } = req.body;
     const userId = req.user.userId;
 
     try {
@@ -24,11 +24,16 @@ export const createTask = async (req, res) => {
             return res.status(403).json({ message: "Not authorized to create tasks for this team" });
         }
 
-        let normalizedAssigneeId = null;
-        if (assigneeId !== undefined && assigneeId !== null && assigneeId !== '') {
-            const parsedAssigneeId = Number(assigneeId);
+        const incomingAssignees = Array.isArray(assigneeIds)
+            ? assigneeIds
+            : (assigneeId !== undefined ? [assigneeId] : []);
+
+        const validatedAssigneeIds = [];
+        for (const entry of incomingAssignees) {
+            if (entry === undefined || entry === null || entry === '') continue;
+            const parsedAssigneeId = Number(entry);
             if (!Number.isInteger(parsedAssigneeId)) {
-                return res.status(400).json({ message: "Invalid assigneeId" });
+                return res.status(400).json({ message: "Invalid assignee id in assigneeIds" });
             }
 
             const assigneeMembership = await prisma.teamMember.findUnique({
@@ -44,8 +49,12 @@ export const createTask = async (req, res) => {
                 return res.status(400).json({ message: "Assignee must be an active member of the team" });
             }
 
-            normalizedAssigneeId = parsedAssigneeId;
+            if (!validatedAssigneeIds.includes(parsedAssigneeId)) {
+                validatedAssigneeIds.push(parsedAssigneeId);
+            }
         }
+
+        const normalizedAssigneeId = validatedAssigneeIds.length ? validatedAssigneeIds[0] : null;
 
         const newTask = await prisma.task.create({
             data: {
@@ -54,6 +63,7 @@ export const createTask = async (req, res) => {
                 status: status || 'To Do',
                 teamId,
                 assigneeId: normalizedAssigneeId,
+                assigneeIds: validatedAssigneeIds,
                 priority: priority || 'Medium',
                 dueDate: dueDate ? new Date(dueDate) : null
             },
@@ -63,27 +73,30 @@ export const createTask = async (req, res) => {
         });
 
         // Only notify the assignee (not all team members)
-        if (normalizedAssigneeId && normalizedAssigneeId !== userId) {
+        if (validatedAssigneeIds.length) {
             const creator = await prisma.user.findUnique({ where: { id: userId } });
-            await createNotification(
-                normalizedAssigneeId,
-                'task_created',
-                `${creator.name} assigned you a task: ${title}`,
-                teamId,
-                newTask.id
-            );
+            for (const assignee of validatedAssigneeIds) {
+                if (assignee === userId) continue;
+                await createNotification(
+                    assignee,
+                    'task_created',
+                    `${creator.name} assigned you a task: ${title}`,
+                    teamId,
+                    newTask.id
+                );
 
-            await pusher.trigger(`user_${normalizedAssigneeId}`, 'new_notification', {
-                type: 'task_created',
-                message: `${creator.name} assigned you a task: ${title}`,
-                teamId,
-                taskId: newTask.id
-            });
+                await pusher.trigger(`user_${assignee}`, 'new_notification', {
+                    type: 'task_created',
+                    message: `${creator.name} assigned you a task: ${title}`,
+                    teamId,
+                    taskId: newTask.id
+                });
 
-            await pusher.trigger(`user_${normalizedAssigneeId}`, 'task_created', {
-                task: newTask,
-                teamId
-            });
+                await pusher.trigger(`user_${assignee}`, 'task_created', {
+                    task: newTask,
+                    teamId
+                });
+            }
         }
 
         // Emit real-time task_created for board sync to the entire team
@@ -135,7 +148,7 @@ export const getTeamTasks = async (req, res) => {
 
 export const updateTask = async (req, res) => {
     const { taskId } = req.params;
-    const { title, description, status, priority, dueDate, assigneeId } = req.body;
+    const { title, description, status, priority, dueDate, assigneeId, assigneeIds } = req.body;
     const userId = req.user.userId;
 
     try {
@@ -157,14 +170,20 @@ export const updateTask = async (req, res) => {
             return res.status(403).json({ message: "Not authorized to update tasks for this team" });
         }
 
+        const incomingAssignees = Array.isArray(assigneeIds)
+            ? assigneeIds
+            : (assigneeId !== undefined ? [assigneeId] : undefined);
+
         let normalizedAssigneeId = undefined;
-        if (assigneeId !== undefined) {
-            if (assigneeId === null || assigneeId === '') {
-                normalizedAssigneeId = null;
-            } else {
-                const parsedAssigneeId = Number(assigneeId);
+        let nextAssigneeIds = undefined;
+
+        if (incomingAssignees !== undefined) {
+            const validatedAssigneeIds = [];
+            for (const entry of incomingAssignees) {
+                if (entry === undefined || entry === null || entry === '') continue;
+                const parsedAssigneeId = Number(entry);
                 if (!Number.isInteger(parsedAssigneeId)) {
-                    return res.status(400).json({ message: "Invalid assigneeId" });
+                    return res.status(400).json({ message: "Invalid assignee id in assigneeIds" });
                 }
 
                 const assigneeMembership = await prisma.teamMember.findUnique({
@@ -180,8 +199,13 @@ export const updateTask = async (req, res) => {
                     return res.status(400).json({ message: "Assignee must be an active member of the team" });
                 }
 
-                normalizedAssigneeId = parsedAssigneeId;
+                if (!validatedAssigneeIds.includes(parsedAssigneeId)) {
+                    validatedAssigneeIds.push(parsedAssigneeId);
+                }
             }
+
+            nextAssigneeIds = validatedAssigneeIds;
+            normalizedAssigneeId = validatedAssigneeIds.length ? validatedAssigneeIds[0] : null;
         }
 
         const updatedTask = await prisma.task.update({
@@ -192,7 +216,8 @@ export const updateTask = async (req, res) => {
                 status: status !== undefined ? status : undefined,
                 priority: priority !== undefined ? priority : undefined,
                 dueDate: dueDate ? new Date(dueDate) : (dueDate === null ? null : undefined),
-                assigneeId: normalizedAssigneeId
+                assigneeId: normalizedAssigneeId,
+                assigneeIds: nextAssigneeIds !== undefined ? nextAssigneeIds : undefined
             },
             include: {
                 assignee: { select: { id: true, name: true } }
@@ -200,28 +225,31 @@ export const updateTask = async (req, res) => {
         });
 
         // Only notify the assignee of the task (not all team members)
-        const assignee = updatedTask.assigneeId;
-        if (assignee && assignee !== userId) {
+        const notifyAssignees = Array.isArray(updatedTask.assigneeIds) ? updatedTask.assigneeIds : [];
+        if (notifyAssignees.length) {
             const updater = await prisma.user.findUnique({ where: { id: userId } });
-            await createNotification(
-                assignee,
-                'task_updated',
-                `${updater.name} updated task: ${task.title}`,
-                task.teamId,
-                task.id
-            );
+            for (const assignee of notifyAssignees) {
+                if (assignee === userId) continue;
+                await createNotification(
+                    assignee,
+                    'task_updated',
+                    `${updater.name} updated task: ${task.title}`,
+                    task.teamId,
+                    task.id
+                );
 
-            await pusher.trigger(`user_${assignee}`, 'new_notification', {
-                type: 'task_updated',
-                message: `${updater.name} updated task: ${task.title}`,
-                teamId: task.teamId,
-                taskId: task.id
-            });
+                await pusher.trigger(`user_${assignee}`, 'new_notification', {
+                    type: 'task_updated',
+                    message: `${updater.name} updated task: ${task.title}`,
+                    teamId: task.teamId,
+                    taskId: task.id
+                });
 
-            await pusher.trigger(`user_${assignee}`, 'task_updated', {
-                task: updatedTask,
-                teamId: task.teamId
-            });
+                await pusher.trigger(`user_${assignee}`, 'task_updated', {
+                    task: updatedTask,
+                    teamId: task.teamId
+                });
+            }
         }
 
         // Emit real-time task_updated for board sync to the entire team

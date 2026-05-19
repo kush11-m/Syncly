@@ -57,6 +57,7 @@ model Task {
   dueDate     DateTime?
   teamId      String
   assigneeId  Int?
+  assigneeIds Int[]    @default([])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

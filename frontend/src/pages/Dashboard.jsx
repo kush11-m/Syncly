@@ -130,6 +130,25 @@ export default function Dashboard({ openSettings = false }) {
 
   const normalizeTaskId = (taskId) => String(taskId);
 
+  const normalizeAssigneeIds = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter(v => v !== "" && v != null)
+      .map(v => Number(v))
+      .filter(v => Number.isInteger(v));
+  };
+
+  const enrichTaskAssignees = (task) => {
+    if (!task) return task;
+    const ids = normalizeAssigneeIds(task.assigneeIds);
+    if (!ids.length) return task;
+
+    const nameMap = new Map((team?.members || []).map(m => [Number(m.userId), m.name]));
+    const assigneeNames = ids.map(id => nameMap.get(id)).filter(Boolean);
+    if (!assigneeNames.length) return { ...task, assigneeIds: ids };
+    return { ...task, assigneeIds: ids, assigneeNames };
+  };
+
   const statusToColumnId = (status, sourceColumns = columns, sourceOrder = columnOrder) =>
     findColumnIdByStatus(status, sourceColumns, sourceOrder);
 
@@ -287,7 +306,7 @@ export default function Dashboard({ openSettings = false }) {
 
         tasksData.tasks.forEach(task => {
           const taskId = normalizeTaskId(task.id);
-          newTasks[taskId] = { ...task, content: task.title };
+          newTasks[taskId] = enrichTaskAssignees({ ...task, content: task.title });
 
           let statusColumnId = statusToColumnId(task.status, newColumns, nextOrder);
           const statusExists = nextOrder.some((columnId) => newColumns[columnId]?.title?.toLowerCase() === String(task.status || "").trim().toLowerCase());
@@ -410,7 +429,7 @@ export default function Dashboard({ openSettings = false }) {
 
           setTasks(prev => {
             if (prev[taskId]) return prev;
-            return { ...prev, [taskId]: { ...task, content: task.title } };
+            return { ...prev, [taskId]: enrichTaskAssignees({ ...task, content: task.title }) };
           });
 
           const status = statusToColumnId(task.status);
@@ -458,7 +477,7 @@ export default function Dashboard({ openSettings = false }) {
           setTasks(prev => {
             const oldTask = prev[taskId];
             if (!oldTask) return prev;
-            return { ...prev, [taskId]: { ...task, content: task.title } };
+            return { ...prev, [taskId]: enrichTaskAssignees({ ...task, content: task.title }) };
           });
 
           setColumns(prevCols => {
@@ -615,7 +634,7 @@ export default function Dashboard({ openSettings = false }) {
       const statusTitle = columnIdToStatus(taskData.status);
 
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const tempTask = {
+      const tempTask = enrichTaskAssignees({
         id: tempId,
         title: taskData.content,
         content: taskData.content,
@@ -625,7 +644,7 @@ export default function Dashboard({ openSettings = false }) {
         priority: taskData.priority || "Medium",
         dueDate: taskData.dueDate || null,
         status: statusTitle
-      };
+      });
 
       // Insert temp task into UI
       setTasks(prev => ({ ...prev, [tempId]: tempTask }));
@@ -691,7 +710,7 @@ export default function Dashboard({ openSettings = false }) {
         const next = { ...prev };
         // remove temp if present
         if (next[tempId]) delete next[tempId];
-        next[realId] = { ...newTask, content: newTask.title };
+        next[realId] = enrichTaskAssignees({ ...newTask, content: newTask.title });
         return next;
       });
 
@@ -730,10 +749,10 @@ export default function Dashboard({ openSettings = false }) {
     const backendStatus = columnIdToStatus(taskData.status);
 
     // Update with backend format for consistency with Socket.IO events
-    const updatedTaskData = {
+    const updatedTaskData = enrichTaskAssignees({
       ...taskData,
       status: backendStatus
-    };
+    });
 
     // Optimistic update with backend format
     setTasks(prev => ({ ...prev, [normalizedTaskId]: updatedTaskData }));
@@ -768,7 +787,7 @@ export default function Dashboard({ openSettings = false }) {
         // Update with actual backend response to ensure consistency
         setTasks(prev => ({
           ...prev,
-          [responseTaskId]: { ...data.task, content: data.task.title }
+          [responseTaskId]: enrichTaskAssignees({ ...data.task, content: data.task.title })
         }));
       }
     } catch (error) {

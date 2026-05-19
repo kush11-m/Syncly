@@ -22,6 +22,8 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
         assigneeIds: [],
         dueDate: "",
     });
+    const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
+    const [draftAssigneeIds, setDraftAssigneeIds] = useState([]);
 
     useEffect(() => {
         if (isOpen) {
@@ -53,6 +55,9 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
                     dueDate: toDateInputValue(initialDate || new Date()),
                 });
             }
+
+            setAssigneePickerOpen(false);
+            setDraftAssigneeIds([]);
         }
     }, [isOpen, task, initialDate, initialStatus, statusOptions]);
 
@@ -63,9 +68,28 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
         onSave({
             ...formData,
             id: task?.id,
-            assigneeIds: Array.isArray(formData.assigneeIds) ? formData.assigneeIds.map(v => Number(v)) : (formData.assigneeIds ? [Number(formData.assigneeIds)] : [])
+            assigneeIds: Array.isArray(formData.assigneeIds)
+                ? formData.assigneeIds.filter(v => v !== "" && v != null).map(v => Number(v))
+                : (formData.assigneeIds ? [Number(formData.assigneeIds)] : [])
         });
         onClose();
+    };
+
+    const openAssigneePicker = () => {
+        setDraftAssigneeIds(Array.isArray(formData.assigneeIds) ? [...formData.assigneeIds] : []);
+        setAssigneePickerOpen(true);
+    };
+
+    const toggleDraftAssignee = (userId) => {
+        setDraftAssigneeIds((prev) => {
+            if (prev.includes(userId)) return prev.filter(id => id !== userId);
+            return [...prev, userId];
+        });
+    };
+
+    const applyDraftAssignees = () => {
+        setFormData({ ...formData, assigneeIds: draftAssigneeIds });
+        setAssigneePickerOpen(false);
     };
 
     return (
@@ -133,22 +157,74 @@ export default function TaskModal({ isOpen, onClose, onSave, task, initialDate, 
 
                     <div>
                         <label className="block text-sm font-medium mb-1 opacity-80 text-zinc-400">Assignees</label>
-                        <select
-                            multiple
-                            value={formData.assigneeIds}
-                            onChange={(e) => {
-                                const values = Array.from(e.target.selectedOptions).map(o => o.value);
-                                setFormData({ ...formData, assigneeIds: values });
-                            }}
-                            className="w-full px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors appearance-none"
+                        <button
+                            type="button"
+                            onClick={openAssigneePicker}
+                            className="w-full text-left px-3 py-2.5 rounded-xl border focus:outline-none focus:ring-1 focus:ring-orange-500/50 bg-white/5 border-white/5 text-zinc-100 focus:bg-white/10 transition-colors"
                         >
-                            <option value="" className="bg-zinc-900 text-zinc-100">Unassigned</option>
-                            {teamMembers.map((member) => (
-                                <option key={member.userId} value={member.userId} className="bg-zinc-900 text-zinc-100">
-                                    {member.name}
-                                </option>
-                            ))}
-                        </select>
+                            {formData.assigneeIds?.length
+                                ? teamMembers
+                                    .filter(m => formData.assigneeIds.includes(String(m.userId)))
+                                    .map(m => m.name)
+                                    .join(", ")
+                                : "Unassigned"}
+                        </button>
+
+                        {assigneePickerOpen && (
+                            <div className="mt-2 rounded-xl border border-white/10 bg-zinc-950/80 p-3 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-zinc-300">Select assignees</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssigneePickerOpen(false)}
+                                        className="text-xs text-zinc-400 hover:text-zinc-200"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                                <div className="max-h-40 overflow-y-auto space-y-2">
+                                    <label className="flex items-center gap-2 text-sm text-zinc-200">
+                                        <input
+                                            type="checkbox"
+                                            className="accent-orange-500"
+                                            checked={draftAssigneeIds.length === 0}
+                                            onChange={() => setDraftAssigneeIds([])}
+                                        />
+                                        Unassigned
+                                    </label>
+                                    {teamMembers.map((member) => {
+                                        const value = String(member.userId);
+                                        return (
+                                            <label key={member.userId} className="flex items-center gap-2 text-sm text-zinc-200">
+                                                <input
+                                                    type="checkbox"
+                                                    className="accent-orange-500"
+                                                    checked={draftAssigneeIds.includes(value)}
+                                                    onChange={() => toggleDraftAssignee(value)}
+                                                />
+                                                {member.name}
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAssigneePickerOpen(false)}
+                                        className="px-3 py-1.5 rounded-lg text-sm border border-white/10 text-zinc-300 hover:bg-white/5"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={applyDraftAssignees}
+                                        className="px-3 py-1.5 rounded-lg text-sm bg-orange-600 hover:bg-orange-500 text-white"
+                                    >
+                                        OK
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex justify-end gap-3 mt-6">
