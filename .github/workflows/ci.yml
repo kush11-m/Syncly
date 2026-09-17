@@ -1,0 +1,128 @@
+name: CI & Maintenance
+
+'on':
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Runs daily at 18:00 UTC (11:30 PM IST)
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend (Lint & Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run production build
+        run: npm run build
+
+  backend:
+    name: Backend (Syntax, Schema & Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: syncly_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate --schema=schema.prisma
+
+      - name: Check JavaScript syntax
+        run: node --check server.js
+
+      - name: Run backend build (database push & client generation)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/syncly_test?schema=public
+        run: npm run build
+
+  maintenance:
+    name: Maintenance (Schema Docs Sync)
+    # Runs on daily schedule, manual dispatch, or pushes to main
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Regenerate Prisma schema documentation
+        run: node scripts/generate-schema-docs.js
+
+      - name: Commit and push changes if documentation updated
+        run: |
+          if git diff --quiet docs/DATABASE_SCHEMA.md; then
+            echo "Schema documentation is up to date. No changes to commit."
+          else
+            echo "Changes detected in schema documentation. Committing and pushing..."
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/DATABASE_SCHEMA.md
+            git commit -m "docs: auto-sync database schema reference [skip ci]"
+            git push origin main
+          fi
